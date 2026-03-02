@@ -1,0 +1,5 @@
+{
+  "name": "Kiosk Inventory Manager",
+  "description": "A kiosk application for managing work positions with Click & Store logic, picking workflow, and local data persistence.",
+  "requestFramePermissions": []
+}
