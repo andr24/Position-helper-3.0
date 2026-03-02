@@ -25,90 +25,55 @@ This is a React-based Kiosk application designed to work fully offline using `sq
 
 ## Development
 
-To run the application in development mode:
+To run the application in development mode with hot-reloading:
 
 ```bash
-npm run dev
+npm run electron:dev
 ```
 
-Open your browser to `http://localhost:3000`.
+This will start the Vite frontend server and launch the Electron application window.
 
-## Production Build
+## Building the Windows Executable (.exe)
 
-To build the application for production:
+This project uses `electron-builder` to package the app into a single, installable Windows application.
+
+To build the executable:
 
 ```bash
-npm run build
+npm run build:exe
 ```
 
-This will generate static files in the `dist` directory.
+This will create a `dist_electron` folder containing:
+1. **`Kiosk Inventory System Setup x.x.x.exe`**: An installer for the application.
+2. **`win-unpacked/Kiosk Inventory System.exe`**: A portable version of the app you can run directly without installing.
 
-To run the production build:
+## iOS or macOS Deployment
 
-```bash
-npm start
-```
+**Electron** is designed for desktop applications (Windows, macOS, Linux) and **cannot compile directly to an iOS app**. 
 
-## Creating a Single Executable (EXE)
+### Deploying to macOS
+If you are on a Mac, you can update the `build:exe` script in `package.json` to include `"electron-builder --mac"` instead of `--win`, which will output a `.dmg` or `.app` file.
 
-To package this application as a single portable executable (EXE) that requires no installation, you can use `pkg`.
+### Running on an iPad or iOS Device
+Because this application relies on the **File System Access API** (specifically `showDirectoryPicker` to select a local SQLite/JSON folder), it currently requires a desktop-class browser (like Chrome, Edge, or the packaged Electron app). 
 
-1.  **Install `pkg` globally:**
-    ```bash
-    npm install -g pkg
-    ```
+**iOS Safari does not support the File System Access API.** 
 
-2.  **Build the React app:**
-    ```bash
-    npm run build
-    ```
-
-3.  **Package the application:**
-    Run the following command to create an executable for Windows (win), macOS (macos), or Linux (linux).
-    
-    *Note: You may need to adjust the `package.json` "bin" entry or create a separate entry file if `pkg` has trouble with `tsx` directly. A common approach is to compile `server.ts` to JS first or point `pkg` to a JS entry point.*
-
-    **Simplified Steps:**
-    
-    a. Create a `build-server.js` script (or just use `tsc` to compile `server.ts` to `dist-server/server.js`).
-    b. Run:
-       ```bash
-       pkg . --targets node18-win-x64 --output kiosk-app.exe
-       ```
-    
-    **Important:** `pkg` bundles the Node.js runtime and your server code. It does *not* automatically bundle the `dist` folder (the frontend assets) unless configured. You must ensure the `dist` folder is either:
-    -   Copied alongside the EXE.
-    -   Or configured in `pkg` assets.
-
-    **Recommended Approach for Kiosk Deployment:**
-    
-    Since this is a web app, the most robust "single file" solution is actually to use **Electron** or a simple **Chrome Kiosk Mode** shortcut.
-
-    **Option A: Chrome Kiosk Mode (Easiest)**
-    1.  Install Chrome on the Kiosk machine.
-    2.  Create a shortcut with the target:
-        ```
-        "C:\Program Files\Google\Chrome\Application\chrome.exe" --kiosk --app=http://localhost:3000
-        ```
-    3.  Run the local server (`npm start`) in the background (e.g., via a startup script or Windows Service).
-
-    **Option B: Electron (True Single EXE)**
-    1.  Add Electron to the project.
-    2.  Configure `electron-builder` to package the React app and a minimal Electron main process.
-    3.  Build the executable.
+To eventually run this on an iPad natively, you would need to:
+1. Wrap the compiled Vite application (`dist` folder) using a mobile wrapper like **Capacitor**.
+2. Replace the web `showDirectoryPicker` logic in `src/services/filesystem.ts` with the `@capacitor/filesystem` plugin to read and write files to the iOS device's local storage.
 
 ## Usage
 
-1.  **Launch the App**: Open the application in your browser.
-2.  **Connect Folder**: You will be prompted to select a local folder. Choose a folder where you want the database and JSON files to be stored.
-    -   *Note*: The browser will ask for permission to view and edit files in this folder.
-3.  **Home Screen**: Navigate to Store, Pick, Map, or Admin.
-4.  **Store**: Enter item details to store them in a free position.
-5.  **Pick**: Search for an item by Notification ID and confirm pick.
-6.  **Map**: View the status of all positions.
-7.  **Admin**: Enter PIN (default `0000`) to manage rules. Use "Change Storage Folder" to reset the connection.
+1. **Launch the App**: Open the compiled `.exe` or run `npm run electron:dev`.
+2. **Connect Folder**: On first launch, you will be prompted to select a local folder. Choose an empty folder where you want the database (`kiosk_db.json`) and position files to be stored.
+3. **Home Screen**: Navigate to Store, Pick, Map, or Admin.
+4. **Store**: Enter an ID, select NS/SUB/A-Rank, and store the item. The system enforces strict matching for partial parts.
+5. **Pick**: Search for an item by Notification ID and confirm pick. Partial positions cannot be picked.
+6. **Map**: View the visual status of all positions and real-time insights.
+7. **Admin**: Enter PIN (default `0000`) to manage column rules, view Action Logs, and Import/Export Excel backups.
 
 ## Troubleshooting
 
--   **"Folder connection failed"**: Ensure you are using a supported browser (Chrome/Edge) and serving the app over localhost or HTTPS.
--   **Database not saving**: Check if you granted "Read/Write" permissions when prompted by the browser.
+- **"Storage folder not connected"**: Click "Change Storage Folder" in the Admin panel to re-select your database directory.
+- **Build Errors**: Ensure you have run `npm install` and that no other instances of the app are running when you run `npm run build:exe`.
