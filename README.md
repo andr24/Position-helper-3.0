@@ -33,35 +33,40 @@ npm run electron:dev
 
 This will start the Vite frontend server and launch the Electron application window.
 
-## Building the Windows Executable (.exe)
+## Deployment & Installation
 
-This project uses `electron-builder` to package the app into a single, installable Windows application.
+The application can be deployed in three main ways depending on your target device:
 
-To build the executable:
+### 1. Windows (Standalone Application)
+This project uses `electron-builder` to package the web app into a native Windows executable that runs securely offline.
 
+To build the executable, run:
 ```bash
 npm run build:exe
 ```
+This will automatically compile the app and create a `dist_electron` folder containing:
+- **`Kiosk Inventory System Setup x.x.x.exe`**: A standard Windows installer.
+- **`win-unpacked/Kiosk Inventory System.exe`**: A portable executable folder you can run directly from a USB drive without installing.
 
-This will create a `dist_electron` folder containing:
-1. **`Kiosk Inventory System Setup x.x.x.exe`**: An installer for the application.
-2. **`win-unpacked/Kiosk Inventory System.exe`**: A portable version of the app you can run directly without installing.
+### 2. Web Version (Browser / Intranet)
+Because the app uses the native **File System Access API**, it can be hosted as a standard static website on any local intranet server, and accessed via Chrome or Edge.
 
-## iOS or macOS Deployment
+To build the static web version:
+```bash
+npm run build
+```
+This generates a `dist` folder. You can host this folder using any static web server (like NGINX, Apache, or Python's `http.server`). 
+*Note: The browser will ask for permission to read/write to your chosen local folder every time the page hard-refreshes.*
 
-**Electron** is designed for desktop applications (Windows, macOS, Linux) and **cannot compile directly to an iOS app**. 
+### 3. iOS / iPad Deployment
+Apple's iOS Safari **does not support** the File System Access API required by this application to securely write JSON files to the device without a server. 
 
-### Deploying to macOS
-If you are on a Mac, you can update the `build:exe` script in `package.json` to include `"electron-builder --mac"` instead of `--win`, which will output a `.dmg` or `.app` file.
-
-### Running on an iPad or iOS Device
-Because this application relies on the **File System Access API** (specifically `showDirectoryPicker` to select a local SQLite/JSON folder), it currently requires a desktop-class browser (like Chrome, Edge, or the packaged Electron app). 
-
-**iOS Safari does not support the File System Access API.** 
-
-To eventually run this on an iPad natively, you would need to:
-1. Wrap the compiled Vite application (`dist` folder) using a mobile wrapper like **Capacitor**.
-2. Replace the web `showDirectoryPicker` logic in `src/services/filesystem.ts` with the `@capacitor/filesystem` plugin to read and write files to the iOS device's local storage.
+To deploy this exactly as-is to an iPad, you must wrap the web build in a native app shell using **Capacitor**:
+1. Run `npm run build` to generate the web assets.
+2. Initialize Capacitor in the project (`npx cap init`).
+3. Add the iOS platform (`npx cap add ios`).
+4. **Important Code Change**: You must replace the web `showDirectoryPicker` logic in `src/services/filesystem.ts` with the `@capacitor/filesystem` plugin to allow the app to write to the iPad's internal storage natively.
+5. Open XCode (`npx cap open ios`) and build the app to your provisioned iPad.
 
 ## Usage
 
