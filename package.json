@@ -1,0 +1,59 @@
+{
+  "name": "kiosk-inventory-system",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "author": "Kiosk User",
+  "description": "Kiosk Inventory System",
+  "main": "electron/main.js",
+  "scripts": {
+    "dev": "tsx server.ts",
+    "start": "NODE_ENV=production tsx server.ts",
+    "build": "vite build",
+    "preview": "vite preview",
+    "lint": "tsc --noEmit",
+    "electron:dev": "concurrently -k \"vite\" \"node electron/wait-for-vite.mjs\"",
+    "build:exe": "vite build && electron-builder --win"
+  },
+  "build": {
+    "appId": "com.kiosk.inventory",
+    "productName": "Kiosk Inventory System",
+    "asar": false,
+    "directories": {
+      "output": "dist_electron"
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "icon": "electron/icon.png"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/main.js",
+      "!node_modules"
+    ]
+  },
+  "dependencies": {
+    "lucide-react": "^0.546.0",
+    "motion": "^12.23.24",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.1.14",
+    "@types/node": "^22.14.0",
+    "@vitejs/plugin-react": "^5.0.4",
+    "autoprefixer": "^10.4.21",
+    "concurrently": "^9.2.1",
+    "electron": "^40.6.1",
+    "electron-builder": "^26.8.1",
+    "tailwindcss": "^4.1.14",
+    "tsx": "^4.21.0",
+    "typescript": "~5.8.2",
+    "vite": "^6.2.0",
+    "wait-on": "^9.0.4"
+  }
+}
