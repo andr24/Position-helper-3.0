@@ -1,20 +1,14 @@
 import * as XLSX from 'xlsx';
-import { getDB } from './database';
-import { saveDB, isConnected, basePath } from './filesystem';
-import { Position, ColumnRule } from '../types';
+import { getPositions, getRules, getLogs, importData } from '../api';
+import { Position } from '../types';
 
 export async function exportToExcel(): Promise<{ success: boolean; message?: string }> {
-    if (!isConnected() || !basePath) {
-        return { success: false, message: 'Database folder not connected.' };
-    }
-
     try {
-        const db = getDB();
+        const [positions, rules, logs] = await Promise.all([getPositions(), getRules(), getLogs()]);
         const wb = XLSX.utils.book_new();
 
         // Export Positions
-        // Format positions for readability
-        const formattedPositions = db.positions.map(p => ({
+        const formattedPositions = positions.map(p => ({
             Position_ID: p.id,
             Column: p.col_id,
             Row: p.row_idx,
@@ -32,69 +26,36 @@ export async function exportToExcel(): Promise<{ success: boolean; message?: str
         XLSX.utils.book_append_sheet(wb, wsPositions, "Positions");
 
         // Export Rules
-        const wsRules = XLSX.utils.json_to_sheet(db.column_rules);
+        const wsRules = XLSX.utils.json_to_sheet(rules);
         XLSX.utils.book_append_sheet(wb, wsRules, "ColumnRules");
 
         // Export Logs
-        const wsLogs = XLSX.utils.json_to_sheet(db.logs.map(l => ({
+        const wsLogs = XLSX.utils.json_to_sheet(logs.map(l => ({
             ...l,
             timestamp: new Date(l.timestamp).toLocaleString()
         })));
         XLSX.utils.book_append_sheet(wb, wsLogs, "Logs");
 
-        // File Dialog using Electron
-        const electron = window.require('electron');
-        const { ipcRenderer } = electron;
-        const saveResult = await ipcRenderer.invoke('save-excel-dialog');
+        // Browser download
+        XLSX.writeFile(wb, 'kiosk_inventory_export.xlsx');
 
-        if (saveResult.canceled || !saveResult.filePath) {
-            return { success: false, message: 'Export cancelled' };
-        }
-
-        // Write file directly using Node.js
-        const wbBuffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
-        const fs = window.require('fs');
-        fs.writeFileSync(saveResult.filePath, wbBuffer);
-
-        return { success: true, message: 'Exported successfully to ' + saveResult.filePath };
+        return { success: true, message: 'Exported successfully' };
     } catch (err: any) {
         console.error('Export error:', err);
         return { success: false, message: 'Export failed: ' + err.message };
     }
 }
 
-export async function importFromExcel(): Promise<{ success: boolean; message?: string }> {
-    if (!isConnected() || !basePath) {
-        return { success: false, message: 'Database folder not connected.' };
-    }
-
+export async function importFromExcel(buffer: ArrayBuffer): Promise<{ success: boolean; message?: string }> {
     try {
-        const electron = window.require('electron');
-        const { ipcRenderer } = electron;
-
-        const openResult = await ipcRenderer.invoke('open-excel-dialog');
-        if (openResult.canceled || !openResult.filePaths || openResult.filePaths.length === 0) {
-            return { success: false, message: 'Import cancelled' };
-        }
-
-        const filePath = openResult.filePaths[0];
-        const fs = window.require('fs');
-        const buffer = fs.readFileSync(filePath);
-
         // Parse the file
         const wb = XLSX.read(buffer, { type: 'buffer' });
-
-        // We expect "Positions" to exist or we just update rules.
-        // For safety, let's only import rules or just overwrite db? The plan said "overwrite/update the local JSON database state"
-        // To make it simple, let's just warn that this requires careful data mapping, usually people want to restore back what they exported.
 
         if (!wb.Sheets['Positions']) {
             return { success: false, message: 'Invalid format: Missing Positions sheet' };
         }
 
         const positionsRaw: any[] = XLSX.utils.sheet_to_json(wb.Sheets['Positions']);
-
-        const db = getDB();
 
         // Process and overwrite positions
         const newPositions: Position[] = positionsRaw.map(row => ({
@@ -112,25 +73,16 @@ export async function importFromExcel(): Promise<{ success: boolean; message?: s
             timestamp: row.Timestamp ? new Date(row.Timestamp).toISOString() : undefined
         }));
 
-        // Overwrite the DB positions
-        db.positions = newPositions;
-
+        let newRules = undefined;
         // If rules sheet exists, overwrite rules
         if (wb.Sheets['ColumnRules']) {
-            db.column_rules = XLSX.utils.sheet_to_json(wb.Sheets['ColumnRules']);
+            newRules = XLSX.utils.sheet_to_json(wb.Sheets['ColumnRules']);
         }
 
-        // Log the import
-        db.logs.push({
-            id: Date.now(),
-            action: 'IMPORT_EXCEL',
-            details: `Imported DB from ${filePath}`,
-            timestamp: new Date().toISOString()
-        });
+        // Send to backend
+        const res = await importData({ positions: newPositions, rules: newRules });
 
-        await saveDB();
-
-        return { success: true, message: 'Imported successfully. Database updated.' };
+        return { success: res.success, message: res.success ? 'Imported successfully. Database updated.' : res.message };
     } catch (err: any) {
         console.error('Import error:', err);
         return { success: false, message: 'Import failed: ' + err.message };

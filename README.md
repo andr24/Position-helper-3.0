@@ -1,84 +1,110 @@
-# Offline Kiosk Application
+# Kiosk Inventory System (Client-Server Architecture)
 
-This is a React-based Kiosk application designed to work fully offline using `sql.js` (SQLite in the browser) and the File System Access API.
+This project is a robust, offline-first inventory management system designed for warehouse kiosks. It uses a **Client-Server architecture** to allow multiple tablets or PCs (Kiosks) to connect to a single, central database hosted on a dedicated local PC.
+
+## Architecture Overview
+
+*   **The Host PC (Server):** One computer in the warehouse runs the Node.js backend. It hosts the SQLite database (`kiosk.db`) and serves the React frontend.
+*   **The Kiosks (Clients):** Other devices (tablets, laptops, phones) connect to the Host PC over the local Wi-Fi/LAN using a standard web browser (Chrome, Edge, Safari).
+*   **No Cloud Required:** Everything runs locally on your network. No internet connection or Microsoft/Azure logins are required.
 
 ## Features
 
-- **Offline-First**: Runs entirely in the browser without a backend server dependency for data operations.
-- **Local Database**: Uses `sql.js` to manage a SQLite database (`kiosk.db`) directly in the browser.
-- **File System Access**: Connects to a local folder to persist the database and store JSON files for each position.
-- **Kiosk UI**: Large, touch-friendly interface for managing inventory positions (A-Z x 1-8).
-- **Admin Panel**: Secure settings area to manage column rules and reset the storage folder connection.
+*   **Multi-User Sync:** Because all kiosks talk to the single Host PC, data is always perfectly in sync. No race conditions or overwritten files.
+*   **Smart Storage Logic:** Automatically finds the best physical column for an item based on configurable rules (priority, capacity, part type compatibility).
+*   **Partial Storage (NS/SUB):** Handles items that come in two parts (NS and SUB). It will pair them together in the same slot if they share a Notification ID.
+*   **A-Rank Items:** Handles large items that take up a full slot immediately.
+*   **Visual Map:** A real-time visual representation of the warehouse columns and slots.
+*   **Admin Panel:** PIN-protected area to configure column rules, view action logs, and export/import the entire database to Excel.
 
-## Prerequisites
+---
 
-- Node.js (v18 or higher recommended)
-- A modern browser (Chrome, Edge, or Opera) that supports the File System Access API.
+## Setup Instructions
 
-## Installation
+### Phase 1: Setting up the "Host PC" (The Server)
 
-1.  Clone the repository.
-2.  Install dependencies:
+You must pick **one** computer in the warehouse to act as the server. This computer must remain turned on while the warehouse is operating.
+
+1.  **Install Node.js:** Download and install Node.js from [nodejs.org](https://nodejs.org/).
+2.  **Download the Code:** Extract this project folder onto the Host PC.
+3.  **Install Dependencies:**
+    Open a terminal (Command Prompt or PowerShell) in the project folder and run:
     ```bash
     npm install
     ```
+4.  **Build the App:**
+    Compile the React frontend so it's ready to be served:
+    ```bash
+    npm run build
+    ```
+5.  **Start the Server Manually:**
+    Start the backend server:
+    ```bash
+    npm run start
+    ```
+    *You should see a message saying: `Server running on http://0.0.0.0:3000`*
 
-## Development
+### Phase 1.5: Automatic Windows Startup (Optional but Recommended)
 
-To run the application in development mode with hot-reloading:
+To make the Host PC automatically start the server and open the app whenever it is turned on or rebooted:
 
-```bash
-npm run electron:dev
-```
+1.  Press `Win + R` on your keyboard to open the Run dialog.
+2.  Type `shell:startup` and press Enter. This will open your Windows Startup folder.
+3.  Go back to your project folder, right-click on the `start-kiosk-hidden.vbs` file, and select **Create shortcut**.
+4.  Drag and drop that newly created shortcut into the Windows Startup folder you opened in step 2.
+5.  *That's it!* Now, whenever the PC turns on, the server will start silently in the background, and the app will open automatically in your default browser. You can also just double-click `start-kiosk.bat` at any time to launch it manually.
 
-This will start the Vite frontend server and launch the Electron application window.
+### Phase 1.8: Setting a Static IP (Crucial for Reliability)
 
-## Deployment & Installation
+By default, the Host PC's IP address (e.g., `192.168.1.50`) might change if the router restarts. If this happens, all the Kiosks will stop working until you update their bookmarks. To prevent this, set a **Static IP** on the Host PC:
 
-The application can be deployed in three main ways depending on your target device:
+1.  **Get Current Details:**
+    *   Open Command Prompt on the Host PC and type `ipconfig /all`.
+    *   Write down the following values: **IPv4 Address**, **Subnet Mask**, **Default Gateway**, and **DNS Servers**.
+2.  **Open Network Settings:**
+    *   Go to **Settings > Network & Internet**.
+    *   Click on **Ethernet** (or **Wi-Fi** > **Manage known networks** > Select your network).
+    *   Find the **IP assignment** section and click **Edit**.
+3.  **Set Manual IP:**
+    *   Change the setting from **Automatic (DHCP)** to **Manual**.
+    *   Toggle **IPv4** to **On**.
+    *   Fill in the boxes with the values you wrote down in Step 1.
+    *   Click **Save**.
+4.  **Done:** Your Host PC will now always keep the same IP address, ensuring the Kiosks can always find it.
 
-### 1. Windows (Standalone Application)
-This project uses `electron-builder` to package the web app into a native Windows executable that runs securely offline.
+### Phase 2: Connecting the Kiosks
 
-To build the executable, run:
-```bash
-npm run build:exe
-```
-This will automatically compile the app and create a `dist_electron` folder containing:
-- **`Kiosk Inventory System Setup x.x.x.exe`**: A standard Windows installer.
-- **`win-unpacked/Kiosk Inventory System.exe`**: A portable executable folder you can run directly from a USB drive without installing.
+Now that the Host PC is running, you can connect to it from any other device on the same Wi-Fi network.
 
-### 2. Web Version (Browser / Intranet)
-Because the app uses the native **File System Access API**, it can be hosted as a standard static website on any local intranet server, and accessed via Chrome or Edge.
+1.  **Find the Host PC's IP Address:**
+    *   On the Host PC, open Command Prompt and type `ipconfig`.
+    *   Look for the **IPv4 Address** (e.g., `192.168.1.50`).
+2.  **Open the App on a Kiosk:**
+    *   On your tablet or other PC, open a web browser (Chrome/Edge).
+    *   Type the Host PC's IP address followed by `:3000` into the address bar.
+    *   Example: `http://192.168.1.50:3000`
+3.  **Bookmark it:** Save this URL to the home screen of the tablet for easy access.
 
-To build the static web version:
-```bash
-npm run build
-```
-This generates a `dist` folder. You can host this folder using any static web server (like NGINX, Apache, or Python's `http.server`). 
-*Note: The browser will ask for permission to read/write to your chosen local folder every time the page hard-refreshes.*
+---
 
-### 3. iOS / iPad Deployment
-Apple's iOS Safari **does not support** the File System Access API required by this application to securely write JSON files to the device without a server. 
+## Admin Panel & Excel Management
 
-To deploy this exactly as-is to an iPad, you must wrap the web build in a native app shell using **Capacitor**:
-1. Run `npm run build` to generate the web assets.
-2. Initialize Capacitor in the project (`npx cap init`).
-3. Add the iOS platform (`npx cap add ios`).
-4. **Important Code Change**: You must replace the web `showDirectoryPicker` logic in `src/services/filesystem.ts` with the `@capacitor/filesystem` plugin to allow the app to write to the iPad's internal storage natively.
-5. Open XCode (`npx cap open ios`) and build the app to your provisioned iPad.
+The Admin panel is protected by a PIN (Default: **0000**). 
 
-## Usage
-
-1. **Launch the App**: Open the compiled `.exe` or run `npm run electron:dev`.
-2. **Connect Folder**: On first launch, you will be prompted to select a local folder. Choose an empty folder where you want the database (`kiosk_db.json`) and position files to be stored.
-3. **Home Screen**: Navigate to Store, Pick, Map, or Admin.
-4. **Store**: Enter an ID, select NS/SUB/A-Rank, and store the item. The system enforces strict matching for partial parts.
-5. **Pick**: Search for an item by Notification ID and confirm pick. Partial positions cannot be picked.
-6. **Map**: View the visual status of all positions and real-time insights.
-7. **Admin**: Enter PIN (default `0000`) to manage column rules, view Action Logs, and Import/Export Excel backups.
+From the Admin panel, you can:
+1.  **Change Column Rules:** Enable/disable columns, change their priority (1 is highest), and set which item types are allowed in them.
+2.  **View Logs:** See a history of every item stored and picked.
+3.  **Export/Import Excel:** 
+    *   You can download the entire database (Positions, Rules, Logs) as an `.xlsx` file.
+    *   You can edit the Positions or Rules in Excel, and then **Import** the file back into the app to instantly overwrite the database. *(Warning: This replaces the current live data).*
 
 ## Troubleshooting
 
-- **"Storage folder not connected"**: Click "Change Storage Folder" in the Admin panel to re-select your database directory.
-- **Build Errors**: Ensure you have run `npm install` and that no other instances of the app are running when you run `npm run build:exe`.
+*   **Cannot connect from a Kiosk:**
+    *   Ensure the Host PC and the Kiosk are on the exact same Wi-Fi network.
+    *   Ensure the Host PC's Windows Firewall is not blocking port `3000`. You may need to add an inbound rule in Windows Defender Firewall to allow TCP port 3000.
+*   **Server crashes or won't start:**
+    *   Ensure no other application is using port 3000.
+    *   Check the terminal for error messages. Ensure you ran `npm install` successfully.
+*   **Data isn't saving:**
+    *   Ensure the Host PC has write permissions in the project folder (specifically the `data` folder where `kiosk.db` is stored).

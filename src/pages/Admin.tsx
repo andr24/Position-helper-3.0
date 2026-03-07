@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useRef } from 'react';
 import { verifyPin, getRules, saveRules, changePin, getLogs } from '../api';
 import { exportToExcel, importFromExcel } from '../services/excel';
 import { ColumnRule } from '../types';
-import { Lock, Save, Loader2, Download, Upload, List } from 'lucide-react';
+import { Lock, Save, Loader2, Download, Upload, List, Server } from 'lucide-react';
 
 export default function Admin() {
   const [authenticated, setAuthenticated] = useState(false);
@@ -14,6 +14,8 @@ export default function Admin() {
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<'rules' | 'settings' | 'logs'>('rules');
   const [newPin, setNewPin] = useState('');
+  
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -53,6 +55,27 @@ export default function Admin() {
     const newRules = [...rules];
     (newRules[index] as any)[field] = value;
     setRules(newRules);
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    if (window.confirm('WARNING: Importing an Excel file will OVERWRITE the current positions and settings. Proceed?')) {
+      setLoading(true);
+      try {
+        const buffer = await file.arrayBuffer();
+        const res = await importFromExcel(buffer);
+        alert(res.message);
+        if (res.success) window.location.reload();
+      } catch (err) {
+        alert('Failed to read file.');
+      }
+      setLoading(false);
+    }
+    
+    // Reset input
+    if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
   if (!authenticated) {
@@ -191,27 +214,17 @@ export default function Admin() {
             </div>
           </div>
 
-          <h3 className="text-xl font-bold mb-4">Storage Configuration</h3>
+          <h3 className="text-xl font-bold mb-4">Server Status</h3>
           <div className="max-w-md">
-            <div className="p-4 bg-emerald-50 border border-emerald-100 rounded-lg mb-4">
-              <p className="text-emerald-800 font-medium flex items-center gap-2">
-                <span className="w-2 h-2 bg-emerald-500 rounded-full"></span>
-                Local Folder Connected
+            <div className="p-4 bg-blue-50 border border-blue-100 rounded-lg mb-4">
+              <p className="text-blue-800 font-medium flex items-center gap-2">
+                <Server size={20} />
+                Connected to Local Server
               </p>
-              <p className="text-emerald-600 text-sm mt-1">
-                Database and files are being stored in the selected local directory.
+              <p className="text-blue-600 text-sm mt-1">
+                Data is being synced in real-time with the host PC database.
               </p>
             </div>
-
-            <button
-              onClick={() => window.location.reload()}
-              className="w-full py-3 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg font-bold transition-colors"
-            >
-              Change Storage Folder
-            </button>
-            <p className="text-slate-400 text-sm mt-2 text-center">
-              This will reload the application and prompt for a new folder connection.
-            </p>
           </div>
 
           <h3 className="text-xl font-bold mb-4 mt-8">Excel Data Management</h3>
@@ -223,7 +236,7 @@ export default function Admin() {
                 setLoading(true);
                 const res = await exportToExcel();
                 setLoading(false);
-                alert(res.message);
+                if (!res.success) alert(res.message);
               }}
               disabled={loading}
               className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold transition-colors flex items-center justify-center gap-2 relative disabled:opacity-50"
@@ -232,16 +245,16 @@ export default function Admin() {
               Export to Excel
             </button>
 
+            <input 
+              type="file" 
+              accept=".xlsx, .xls" 
+              className="hidden" 
+              ref={fileInputRef}
+              onChange={handleFileUpload}
+            />
+
             <button
-              onClick={async () => {
-                if (window.confirm('WARNING: Importing an Excel file will OVERWRITE the current positions and settings. Proceed?')) {
-                  setLoading(true);
-                  const res = await importFromExcel();
-                  setLoading(false);
-                  alert(res.message);
-                  if (res.success) window.location.reload();
-                }
-              }}
+              onClick={() => fileInputRef.current?.click()}
               disabled={loading}
               className="w-full py-3 bg-amber-600 hover:bg-amber-700 text-white rounded-lg font-bold transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
             >

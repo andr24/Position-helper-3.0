@@ -1,26 +1,21 @@
-import { useEffect, useState, useRef } from 'react';
-import { getPositions, getRules, relocateItem, verifyPin } from '../api';
+import { useEffect, useState } from 'react';
+import { getPositions, getRules, verifyPin, adminUpdatePosition, adminSwapPositions } from '../api';
 import { Position, ColumnRule } from '../types';
-import { RefreshCw, X, Info, Search, ArrowRight, Lock, Unlock } from 'lucide-react';
+import { RefreshCw, X, Info, Lock, Unlock } from 'lucide-react';
 
 export default function Map() {
   const [positions, setPositions] = useState<Position[]>([]);
   const [rules, setRules] = useState<ColumnRule[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedPos, setSelectedPos] = useState<Position | null>(null);
-  const [searchQuery, setSearchQuery] = useState('');
-
-  // Edit Lock state
-  const [editUnlocked, setEditUnlocked] = useState(false);
-  const [showPinModal, setShowPinModal] = useState(false);
-  const [pin, setPin] = useState('');
-  const [pinError, setPinError] = useState('');
-
-  // Drag state
-  const dragFromId = useRef<string | null>(null);
-  const [dragOver, setDragOver] = useState<string | null>(null);
-  const [relocating, setRelocating] = useState(false);
-  const [confirmMove, setConfirmMove] = useState<{ from: Position; to: Position } | null>(null);
+  const [editMode, setEditMode] = useState(false);
+  const [editPos, setEditPos] = useState<Position | null>(null);
+  const [saving, setSaving] = useState(false);
+  
+  const [globalEditMode, setGlobalEditMode] = useState(false);
+  const [globalPin, setGlobalPin] = useState('');
+  const [showGlobalPinModal, setShowGlobalPinModal] = useState(false);
+  const [tempPin, setTempPin] = useState('');
 
   const fetchData = async () => {
     setLoading(true);
@@ -35,7 +30,9 @@ export default function Map() {
     }
   };
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => {
+    fetchData();
+  }, []);
 
   // Calculate Insights
   const totalComplete = positions.filter(p => p.status === 'occupied' && !p.is_a_rank).length;
@@ -46,174 +43,148 @@ export default function Map() {
   const totalExera3 = positions.filter(p => p.notif_type === 'EXERA3' && p.status !== 'free').length;
   const totalFree = positions.filter(p => p.status === 'free').length;
 
-  const searchMatch = searchQuery.trim().toLowerCase();
-  const matchedPositions = searchMatch
-    ? positions.filter(p => p.notification_id?.toLowerCase().includes(searchMatch))
-    : [];
-
+  // Organize by column
+  const enabledRules = rules.filter(r => r.enabled === 1).sort((a, b) => a.col_id.localeCompare(b.col_id));
   const grid: Record<string, Position[]> = {};
-  for (let i = 0; i < 26; i++) grid[String.fromCharCode(65 + i)] = [];
-  positions.forEach(p => { if (grid[p.col_id]) grid[p.col_id].push(p); });
-  Object.keys(grid).forEach(col => grid[col].sort((a, b) => a.row_idx - b.row_idx));
+  
+  enabledRules.forEach(r => {
+    grid[r.col_id] = [];
+  });
 
-  const handleConfirmRelocate = async () => {
-    if (!confirmMove) return;
-    setRelocating(true);
-    try {
-      await relocateItem(confirmMove.from.id, confirmMove.to.id);
-      setConfirmMove(null);
-      await fetchData();
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setRelocating(false);
+  positions.forEach(p => {
+    if (grid[p.col_id]) {
+      grid[p.col_id].push(p);
     }
-  };
+  });
+
+  Object.keys(grid).forEach(col => {
+    grid[col].sort((a, b) => a.row_idx - b.row_idx);
+  });
 
   return (
-    <div className="h-full flex flex-col relative gap-1.5">
-      {/* Top bar */}
-      <div className="flex items-center gap-2 shrink-0 flex-wrap">
-        <div className="relative shrink-0">
-          <Search size={14} className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
-            placeholder="Search ID..."
-            className="pl-7 pr-2 py-1 text-sm border border-slate-300 rounded-lg w-32 focus:w-44 transition-all focus:border-blue-500 focus:ring-1 focus:ring-blue-200 outline-none bg-white"
-          />
+    <div className="h-full flex flex-col relative">
+      <div className="flex justify-between items-center mb-6">
+        <h2 className="text-2xl font-bold text-slate-800">Warehouse Map</h2>
+        <div className="flex gap-3">
+          <button
+            onClick={() => {
+              if (globalEditMode) {
+                setGlobalEditMode(false);
+                setGlobalPin('');
+                setEditMode(false);
+              } else {
+                setShowGlobalPinModal(true);
+              }
+            }}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors ${globalEditMode ? 'bg-amber-100 text-amber-700 hover:bg-amber-200' : 'bg-slate-200 text-slate-700 hover:bg-slate-300'}`}
+          >
+            {globalEditMode ? <Unlock size={20} /> : <Lock size={20} />}
+            {globalEditMode ? 'Edit Mode: ON' : 'Edit Mode: OFF'}
+          </button>
+          <button
+            onClick={fetchData}
+            className="flex items-center gap-2 px-4 py-2 bg-slate-200 hover:bg-slate-300 rounded-lg font-medium transition-colors"
+          >
+            <RefreshCw size={20} className={loading ? 'animate-spin' : ''} />
+            Refresh
+          </button>
         </div>
-
-        <div className="flex gap-1.5 flex-1 overflow-x-auto">
-          {[
-            { label: 'Complete', value: totalComplete, color: 'text-rose-600' },
-            { label: 'A-Rank', value: totalARank, color: 'text-purple-600' },
-            { label: 'Partial', value: totalPartial, color: 'text-amber-500' },
-            { label: 'Free', value: totalFree, color: 'text-emerald-600' },
-            { label: 'OTC', value: totalOTC, color: 'text-slate-600' },
-            { label: 'EX2', value: totalExera2, color: 'text-slate-600' },
-            { label: 'EX3', value: totalExera3, color: 'text-slate-600' },
-          ].map(({ label, value, color }) => (
-            <div key={label} className="flex items-center gap-1 px-2 py-0.5 bg-white rounded-md border border-slate-200 shrink-0">
-              <span className="text-[10px] font-bold text-slate-400 uppercase">{label}</span>
-              <span className={`text-sm font-black ${color}`}>{value}</span>
-            </div>
-          ))}
-        </div>
-
-        <button
-          onClick={() => editUnlocked ? setEditUnlocked(false) : setShowPinModal(true)}
-          className={`flex items-center gap-1.5 px-3 py-1 rounded-lg font-bold transition-colors text-sm shrink-0 ${editUnlocked ? 'bg-indigo-100 text-indigo-700 hover:bg-indigo-200 border border-indigo-200' : 'bg-slate-100 text-slate-500 hover:bg-slate-200 border border-slate-200'
-            }`}
-        >
-          {editUnlocked ? <><Unlock size={14} /> Editing Unlocked</> : <><Lock size={14} /> Unlock to Edit</>}
-        </button>
-
-        <button
-          onClick={fetchData}
-          className="flex items-center gap-1 px-3 py-1 bg-slate-200 hover:bg-slate-300 rounded-lg font-medium transition-colors text-sm shrink-0"
-        >
-          <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
-          Refresh
-        </button>
       </div>
 
-      {/* Map grid */}
-      <div className="flex-1 overflow-x-auto overflow-y-hidden min-h-0">
-        <div className="flex gap-1.5 min-w-max h-full">
-          {Object.keys(grid).map(colId => {
-            const rule = rules.find(r => r.col_id === colId);
-            const isEnabled = rule ? rule.enabled === 1 : true;
-            if (!isEnabled) return null;
+      {/* Insights Dashboard */}
+      <div className="grid grid-cols-4 lg:grid-cols-7 gap-3 mb-6 bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
+        <div className="flex flex-col items-center bg-slate-50 p-3 rounded-xl border border-slate-100">
+          <span className="text-xs font-bold text-slate-500 uppercase">Complete (NS+SUB)</span>
+          <span className="text-2xl font-black text-blue-600">{totalComplete}</span>
+        </div>
+        <div className="flex flex-col items-center bg-slate-50 p-3 rounded-xl border border-slate-100">
+          <span className="text-xs font-bold text-slate-500 uppercase">A-Rank</span>
+          <span className="text-2xl font-black text-purple-600">{totalARank}</span>
+        </div>
+        <div className="flex flex-col items-center bg-slate-50 p-3 rounded-xl border border-slate-100">
+          <span className="text-xs font-bold text-slate-500 uppercase">Partial</span>
+          <span className="text-2xl font-black text-amber-500">{totalPartial}</span>
+        </div>
+        <div className="flex flex-col items-center bg-slate-50 p-3 rounded-xl border border-slate-100">
+          <span className="text-xs font-bold text-slate-500 uppercase">Open (Free)</span>
+          <span className="text-2xl font-black text-emerald-600">{totalFree}</span>
+        </div>
+        <div className="flex flex-col items-center bg-slate-50 p-3 rounded-xl border border-slate-100">
+          <span className="text-xs font-bold text-slate-500 uppercase">OTC</span>
+          <span className="text-2xl font-black text-slate-700">{totalOTC}</span>
+        </div>
+        <div className="flex flex-col items-center bg-slate-50 p-3 rounded-xl border border-slate-100">
+          <span className="text-xs font-bold text-slate-500 uppercase">EXERA2</span>
+          <span className="text-2xl font-black text-slate-700">{totalExera2}</span>
+        </div>
+        <div className="flex flex-col items-center bg-slate-50 p-3 rounded-xl border border-slate-100">
+          <span className="text-xs font-bold text-slate-500 uppercase">EXERA3</span>
+          <span className="text-2xl font-black text-slate-700">{totalExera3}</span>
+        </div>
+      </div>
 
-            const capacity = rule?.capacity || 8;
-            const filled = grid[colId].filter(p => p.status !== 'free').length;
-            const fillPct = Math.min(100, (filled / capacity) * 100);
+      <div className="flex-1 overflow-x-auto overflow-y-hidden pb-4">
+        <div className="flex gap-4 min-w-max h-full">
+          {enabledRules.map(rule => {
+            const colId = rule.col_id;
+            const capacity = rule.capacity || 8;
 
             return (
-              <div key={colId} className="w-[72px] flex flex-col gap-0.5">
-                <div className="text-center shrink-0">
-                  <div className="font-bold text-sm text-slate-500 bg-slate-100 rounded-t-md py-0.5">{colId}</div>
-                  <div className="h-1 bg-slate-200 rounded-b-md overflow-hidden">
-                    <div
-                      className={`h-full transition-all ${fillPct > 80 ? 'bg-rose-500' : fillPct > 50 ? 'bg-amber-400' : 'bg-emerald-500'}`}
-                      style={{ width: `${fillPct}%` }}
-                    />
-                  </div>
+              <div key={colId} className="w-24 flex flex-col gap-2">
+                <div className="text-center font-bold text-xl text-slate-500 bg-slate-100 rounded-lg py-2">
+                  {colId}
                 </div>
-
-                <div className="flex-1 flex flex-col gap-0.5">
+                <div className="flex-1 flex flex-col gap-2">
                   {Array.from({ length: capacity }, (_, i) => i + 1).map(rowIdx => {
                     const pos = grid[colId].find(p => p.row_idx === rowIdx);
                     const isOccupied = pos?.status === 'occupied';
                     const isPartial = pos?.status === 'partial';
-                    const isFree = !pos || pos.status === 'free';
-                    const isSearchHit = searchMatch && matchedPositions.some(m => m.col_id === colId && m.row_idx === rowIdx);
-                    const isDragTarget = dragOver === pos?.id || (isFree && dragOver === `${colId}-${rowIdx}`);
-
-                    const daysStored = pos?.timestamp
-                      ? Math.floor((Date.now() - new Date(pos.timestamp).getTime()) / 86400000)
-                      : null;
 
                     let bgClass = 'bg-emerald-100 border-emerald-200 text-emerald-700 hover:bg-emerald-200';
                     if (isOccupied) {
                       bgClass = pos?.is_a_rank
                         ? 'bg-purple-500 border-purple-600 text-white hover:bg-purple-600 shadow-md'
-                        : 'bg-rose-500 border-rose-600 text-white hover:bg-rose-600 shadow-md';
+                        : 'bg-blue-500 border-blue-600 text-white hover:bg-blue-600 shadow-md';
                     } else if (isPartial) {
                       bgClass = 'bg-amber-400 border-amber-500 text-white hover:bg-amber-500 shadow-sm';
                     }
 
-                    const cellId = pos?.id ?? `${colId}-${rowIdx}`;
-                    const canDrag = (isOccupied || isPartial) && editUnlocked;
-                    const canDrop = isFree && dragFromId.current !== null && editUnlocked;
-
                     return (
                       <button
                         key={`${colId}-${rowIdx}`}
-                        draggable={canDrag}
-                        onDragStart={e => {
-                          if (!canDrag || !pos) { e.preventDefault(); return; }
-                          dragFromId.current = pos.id;
+                        onClick={() => {
+                          setSelectedPos(pos!);
+                          setEditMode(false);
+                        }}
+                        draggable={globalEditMode && (isOccupied || isPartial)}
+                        onDragStart={(e) => {
+                          if (!globalEditMode) return;
+                          e.dataTransfer.setData('text/plain', pos!.id);
                           e.dataTransfer.effectAllowed = 'move';
                         }}
-                        onDragEnd={() => { dragFromId.current = null; setDragOver(null); }}
-                        onDragOver={e => {
-                          if (isFree && dragFromId.current) {
-                            e.preventDefault();
-                            e.dataTransfer.dropEffect = 'move';
-                            setDragOver(cellId);
+                        onDragOver={(e) => {
+                          if (!globalEditMode) return;
+                          e.preventDefault();
+                          e.dataTransfer.dropEffect = 'move';
+                        }}
+                        onDrop={async (e) => {
+                          e.preventDefault();
+                          if (!globalEditMode) return;
+                          const fromId = e.dataTransfer.getData('text/plain');
+                          if (fromId && fromId !== pos!.id) {
+                            const res = await adminSwapPositions(globalPin, fromId, pos!.id);
+                            if (res.success) {
+                              fetchData();
+                            } else {
+                              alert(res.message || 'Failed to move');
+                            }
                           }
                         }}
-                        onDragLeave={() => setDragOver(null)}
-                        onDrop={e => {
-                          e.preventDefault();
-                          setDragOver(null);
-                          if (!isFree || !dragFromId.current) return;
-                          const fromPos = positions.find(p => p.id === dragFromId.current);
-                          // Build a placeholder for the free target cell
-                          const toPos = pos ?? { id: `${colId}-${rowIdx}`, col_id: colId, row_idx: rowIdx, status: 'free', has_ns: false, has_sub: false, is_a_rank: false };
-                          if (fromPos) setConfirmMove({ from: fromPos, to: toPos as Position });
-                          dragFromId.current = null;
-                        }}
-                        onClick={() => {
-                          if ((isOccupied || isPartial) && pos) setSelectedPos(pos);
-                        }}
-                        disabled={!canDrag && !canDrop}
-                        className={`flex-1 rounded-md flex flex-col items-center justify-center text-xs font-bold border transition-all cursor-pointer disabled:cursor-default
-                          ${bgClass}
-                          ${isSearchHit ? 'ring-2 ring-blue-500 ring-offset-1 scale-110 z-10' : ''}
-                          ${isDragTarget && isFree ? 'ring-2 ring-indigo-500 bg-indigo-100 border-indigo-400 scale-105' : ''}
-                          ${canDrag ? 'cursor-grab active:cursor-grabbing' : ''}
-                        `}
+                        className={`flex-1 min-h-0 rounded-lg flex flex-col items-center justify-center text-sm font-bold border transition-colors cursor-pointer ${bgClass}`}
                       >
-                        <span className="text-sm leading-none">{rowIdx}</span>
-                        {pos?.is_a_rank && <span className="text-[8px] leading-none opacity-75">(A)</span>}
-                        {isPartial && <span className="text-[8px] leading-none opacity-90">{pos?.has_ns ? 'NS' : 'SUB'}</span>}
-                        {daysStored !== null && (isOccupied || isPartial) && (
-                          <span className={`text-[8px] leading-none font-semibold mt-0.5 ${daysStored > 14 ? 'text-red-200' : daysStored > 7 ? 'text-yellow-200' : 'text-white/70'}`}>{daysStored}d</span>
-                        )}
+                        <span className="text-lg">{rowIdx}</span>
+                        {pos?.is_a_rank && <span className="text-[10px] leading-tight opacity-75">(A)</span>}
+                        {isPartial && <span className="text-[10px] leading-tight opacity-90">{pos?.has_ns ? 'NS' : 'SUB'}</span>}
                       </button>
                     );
                   })}
@@ -224,176 +195,227 @@ export default function Map() {
         </div>
       </div>
 
-      {/* Legend */}
-      <div className="shrink-0 flex gap-4 justify-center py-0.5">
-        {[
-          { bg: 'bg-emerald-100 border-emerald-200', label: 'Free' },
-          { bg: 'bg-amber-400 border-amber-500', label: 'Partial' },
-          { bg: 'bg-rose-500 border-rose-600', label: 'Complete' },
-          { bg: 'bg-purple-500 border-purple-600', label: 'A-Rank' },
-        ].map(({ bg, label }) => (
-          <div key={label} className="flex items-center gap-1">
-            <div className={`w-3 h-3 rounded-sm ${bg} border`}></div>
-            <span className="text-[11px] font-medium text-slate-500">{label}</span>
-          </div>
-        ))}
-        <span className="text-[11px] text-slate-400 ml-2 flex items-center gap-1">
-          {editUnlocked ? <Unlock size={10} /> : <Lock size={10} />}
-          {editUnlocked ? 'Drag to relocate is enabled' : 'Unlock to relocate items'}
-        </span>
+      <div className="mt-4 flex gap-6 justify-center flex-wrap">
+        <div className="flex items-center gap-2">
+          <div className="w-6 h-6 bg-emerald-100 border border-emerald-200 rounded"></div>
+          <span className="font-medium text-slate-600 text-sm">Free</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="w-6 h-6 bg-amber-400 border border-amber-500 rounded"></div>
+          <span className="font-medium text-slate-600 text-sm">Partial (NS or SUB)</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="w-6 h-6 bg-blue-500 border border-blue-600 rounded"></div>
+          <span className="font-medium text-slate-600 text-sm">Complete (NS+SUB)</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="w-6 h-6 bg-purple-500 border border-purple-600 rounded"></div>
+          <span className="font-medium text-slate-600 text-sm">A-Rank</span>
+        </div>
       </div>
 
-      {/* Confirm Relocate Modal */}
-      {showPinModal && (
-        <div className="absolute inset-0 z-[60] flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 animate-in zoom-in-95 duration-200 border border-slate-200">
-            <div className="w-12 h-12 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center mx-auto mb-4">
-              <Lock size={24} />
-            </div>
-            <h3 className="text-xl font-bold text-slate-800 mb-2 text-center">Unlock Map Editing</h3>
-            <p className="text-sm text-slate-500 text-center mb-6">Enter Admin PIN to enable drag-and-drop</p>
-            <form onSubmit={async (e) => {
-              e.preventDefault();
-              const res = await verifyPin(pin);
-              if (res.success) {
-                setEditUnlocked(true);
-                setShowPinModal(false);
-                setPin('');
-                setPinError('');
-              } else {
-                setPinError('Invalid PIN');
-                setPin('');
-              }
-            }}>
-              <input
-                type="password"
-                required
-                autoFocus
-                value={pin}
-                onChange={e => setPin(e.target.value)}
-                className="w-full text-center text-3xl tracking-widest p-4 border-2 border-slate-300 rounded-xl focus:border-indigo-500 outline-none mb-2 font-mono"
-                maxLength={8}
-              />
-              {pinError && <p className="text-red-500 text-sm text-center mb-4 font-bold">{pinError}</p>}
-              <div className="flex gap-3 mt-6">
-                <button
-                  type="button"
-                  onClick={() => { setShowPinModal(false); setPin(''); setPinError(''); }}
-                  className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl"
-                >
-                  Unlock
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {confirmMove && (
-        <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
-            <h3 className="text-lg font-bold text-slate-800 mb-4">Confirm Relocation</h3>
-            <div className="flex items-center justify-center gap-4 mb-6">
-              <div className="text-center">
-                <div className="text-2xl font-black text-slate-700">{confirmMove.from.id}</div>
-                <div className="text-xs text-slate-400 font-mono">{confirmMove.from.notification_id}</div>
-              </div>
-              <ArrowRight size={24} className="text-slate-400 shrink-0" />
-              <div className="text-center">
-                <div className="text-2xl font-black text-emerald-600">{confirmMove.to.id}</div>
-                <div className="text-xs text-slate-400">free</div>
-              </div>
-            </div>
-            <div className="flex gap-3">
-              <button
-                onClick={() => setConfirmMove(null)}
-                className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleConfirmRelocate}
-                disabled={relocating}
-                className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl transition-colors disabled:opacity-50"
-              >
-                {relocating ? 'Moving...' : 'Confirm'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Position Detail Modal */}
-      {selectedPos && !confirmMove && (
-        <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4">
-          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden">
-            <div className="bg-slate-100 p-5 flex justify-between items-center border-b border-slate-200">
+      {selectedPos && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="bg-slate-100 p-6 flex justify-between items-center border-b border-slate-200">
               <div className="flex items-center gap-3">
-                <div className="bg-blue-100 p-2 rounded-lg text-blue-600"><Info size={22} /></div>
-                <h3 className="text-xl font-bold text-slate-800">Position {selectedPos.id}</h3>
+                <div className="bg-blue-100 p-2 rounded-lg text-blue-600">
+                  <Info size={24} />
+                </div>
+                <h3 className="text-2xl font-bold text-slate-800">Position {selectedPos.id} {editMode && '(Edit)'}</h3>
               </div>
               <button
                 onClick={() => setSelectedPos(null)}
                 className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-full transition-colors"
               >
-                <X size={24} />
+                <X size={28} />
               </button>
             </div>
 
-            <div className="p-6 space-y-4">
-              <div>
-                <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Notification ID</p>
-                <p className="text-3xl font-mono font-black text-slate-900">{selectedPos.notification_id}</p>
-              </div>
-
-              <div className="grid grid-cols-3 gap-4">
-                <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
-                  <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Status</p>
-                  <p className="text-lg font-bold text-slate-800 capitalize">
-                    {selectedPos.is_a_rank ? 'A-Rank' : selectedPos.status}
-                  </p>
+            {editMode && editPos ? (
+              <div className="p-8 space-y-4 max-h-[60vh] overflow-y-auto">
+                <div>
+                  <label className="block text-sm font-bold text-slate-500 mb-1">Status</label>
+                  <select value={editPos.status} onChange={e => setEditPos({...editPos, status: e.target.value as any})} className="w-full p-3 border rounded-lg bg-white">
+                    <option value="free">Free</option>
+                    <option value="partial">Partial</option>
+                    <option value="occupied">Occupied</option>
+                  </select>
                 </div>
-                <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
-                  <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Type</p>
-                  <p className="text-lg font-bold text-slate-800">{selectedPos.notif_type}</p>
+                <div>
+                  <label className="block text-sm font-bold text-slate-500 mb-1">Notification ID</label>
+                  <input type="text" value={editPos.notification_id || ''} onChange={e => setEditPos({...editPos, notification_id: e.target.value})} className="w-full p-3 border rounded-lg" />
                 </div>
-                <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
-                  <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Stored</p>
-                  <p className={`text-lg font-bold ${(() => {
-                    const d = selectedPos.timestamp ? Math.floor((Date.now() - new Date(selectedPos.timestamp).getTime()) / 86400000) : 0;
-                    return d > 14 ? 'text-red-600' : d > 7 ? 'text-amber-500' : 'text-emerald-600';
-                  })()}`}>
-                    {selectedPos.timestamp ? `${Math.floor((Date.now() - new Date(selectedPos.timestamp).getTime()) / 86400000)}d` : '—'}
-                  </p>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-bold text-slate-500 mb-1">Part Group</label>
+                    <select value={editPos.part_group || ''} onChange={e => setEditPos({...editPos, part_group: e.target.value})} className="w-full p-3 border rounded-lg bg-white">
+                      <option value="">(None)</option>
+                      <option value="NS">NS</option>
+                      <option value="SUB">SUB</option>
+                      <option value="NS+SUB">NS+SUB</option>
+                      <option value="A-Rank">A-Rank</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-slate-500 mb-1">Notif Type</label>
+                    <select value={editPos.notif_type || ''} onChange={e => setEditPos({...editPos, notif_type: e.target.value})} className="w-full p-3 border rounded-lg bg-white">
+                      <option value="">(None)</option>
+                      <option value="OTC">OTC</option>
+                      <option value="EXERA2">EXERA2</option>
+                      <option value="EXERA3">EXERA3</option>
+                    </select>
+                  </div>
+                </div>
+                <div className="flex gap-4 pt-2">
+                  <label className="flex items-center gap-2"><input type="checkbox" checked={editPos.has_ns} onChange={e => setEditPos({...editPos, has_ns: e.target.checked})} className="w-4 h-4" /> NS</label>
+                  <label className="flex items-center gap-2"><input type="checkbox" checked={editPos.has_sub} onChange={e => setEditPos({...editPos, has_sub: e.target.checked})} className="w-4 h-4" /> SUB</label>
+                  <label className="flex items-center gap-2"><input type="checkbox" checked={editPos.is_a_rank} onChange={e => setEditPos({...editPos, is_a_rank: e.target.checked})} className="w-4 h-4" /> A-Rank</label>
                 </div>
               </div>
+            ) : (
+              <div className="p-8 space-y-6">
+                {selectedPos.status === 'free' ? (
+                  <div className="text-center py-8">
+                    <p className="text-2xl font-bold text-emerald-600 mb-2">Position is Free</p>
+                    <p className="text-slate-500">This slot is currently empty and available for storage.</p>
+                  </div>
+                ) : (
+                  <>
+                    <div>
+                      <p className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-1">Notification ID</p>
+                      <p className="text-4xl font-mono font-black text-slate-900">{selectedPos.notification_id}</p>
+                    </div>
 
-              <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
-                <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Parts Present</p>
-                <div className="flex gap-2 mt-1">
-                  {selectedPos.has_ns ? <span className="px-3 py-1 bg-blue-100 text-blue-700 font-bold rounded-lg text-sm">NS</span> : <span className="px-3 py-1 bg-slate-200 text-slate-400 font-bold rounded-lg text-sm line-through">NS</span>}
-                  {selectedPos.has_sub ? <span className="px-3 py-1 bg-emerald-100 text-emerald-700 font-bold rounded-lg text-sm">SUB</span> : <span className="px-3 py-1 bg-slate-200 text-slate-400 font-bold rounded-lg text-sm line-through">SUB</span>}
-                </div>
+                    <div className="grid grid-cols-2 gap-6">
+                      <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                        <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Status</p>
+                        <p className="text-xl font-bold text-slate-800 capitalize">
+                          {selectedPos.is_a_rank ? 'A-Rank' : selectedPos.status}
+                        </p>
+                      </div>
+                      <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                        <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Stored Type</p>
+                        <p className="text-xl font-bold text-slate-800">{selectedPos.notif_type}</p>
+                      </div>
+                    </div>
+
+                    <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 flex justify-between items-center">
+                      <div>
+                        <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Parts Present</p>
+                        <div className="flex gap-2 mt-2">
+                          {selectedPos.has_ns ? <span className="px-3 py-1 bg-blue-100 text-blue-700 font-bold rounded-lg text-sm">NS</span> : <span className="px-3 py-1 bg-slate-200 text-slate-400 font-bold rounded-lg text-sm line-through">NS</span>}
+                          {selectedPos.has_sub ? <span className="px-3 py-1 bg-emerald-100 text-emerald-700 font-bold rounded-lg text-sm">SUB</span> : <span className="px-3 py-1 bg-slate-200 text-slate-400 font-bold rounded-lg text-sm line-through">SUB</span>}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="pt-4 border-t border-slate-100">
+                      <p className="text-sm text-slate-500">
+                        Stored by <strong className="text-slate-800">{selectedPos.user_name || 'Unknown Operator'}</strong>
+                      </p>
+                      <p className="text-sm text-slate-500 mt-1">
+                        On {selectedPos.timestamp ? new Date(selectedPos.timestamp).toLocaleString() : 'Unknown'}
+                      </p>
+                    </div>
+                  </>
+                )}
               </div>
+            )}
 
-              <div className="pt-3 border-t border-slate-100 text-sm text-slate-500">
-                <p>Stored by <strong className="text-slate-800">{selectedPos.user_name || 'Unknown'}</strong></p>
-                <p className="mt-0.5">On {new Date(selectedPos.timestamp!).toLocaleString()}</p>
+            {!editMode && (
+              <div className="p-4 bg-slate-50 border-t border-slate-200 flex gap-4">
+                {globalEditMode && (
+                  <button
+                    onClick={() => {
+                      setEditMode(true);
+                      setEditPos({ ...selectedPos });
+                    }}
+                    className="flex-1 py-4 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded-xl transition-colors text-lg"
+                  >
+                    Edit Position
+                  </button>
+                )}
+                <button
+                  onClick={() => setSelectedPos(null)}
+                  className="flex-1 py-4 bg-slate-800 hover:bg-slate-900 text-white font-bold rounded-xl transition-colors text-lg"
+                >
+                  Close View
+                </button>
               </div>
-            </div>
+            )}
 
-            <div className="p-3 bg-slate-50 border-t border-slate-200">
+            {editMode && (
+              <div className="p-4 bg-slate-50 border-t border-slate-200 flex gap-4">
+                <button
+                  onClick={() => setEditMode(false)}
+                  className="flex-1 py-4 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded-xl transition-colors text-lg"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={async () => {
+                    setSaving(true);
+                    const res = await adminUpdatePosition(globalPin, editPos!);
+                    setSaving(false);
+                    if (res.success) {
+                      fetchData();
+                      setSelectedPos(null);
+                    } else {
+                      alert(res.message || 'Failed to update');
+                    }
+                  }}
+                  disabled={saving}
+                  className="flex-1 py-4 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl transition-colors text-lg disabled:opacity-50"
+                >
+                  {saving ? 'Saving...' : 'Save Changes'}
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Global PIN Modal */}
+      {showGlobalPinModal && (
+        <div className="absolute inset-0 z-[70] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-in fade-in">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden p-6">
+            <h3 className="text-2xl font-bold text-slate-800 mb-2">Enable Edit Mode</h3>
+            <p className="text-slate-600 mb-6">Enter Admin PIN to unlock drag-and-drop and position editing.</p>
+            
+            <input 
+              type="password" 
+              value={tempPin} 
+              onChange={e => setTempPin(e.target.value)} 
+              placeholder="Enter Admin PIN" 
+              className="w-full p-4 border-2 border-slate-300 rounded-xl text-center font-mono text-xl focus:border-emerald-500 outline-none mb-4"
+              autoFocus
+            />
+            
+            <div className="flex gap-4">
               <button
-                onClick={() => setSelectedPos(null)}
-                className="w-full py-3 bg-slate-800 hover:bg-slate-900 text-white font-bold rounded-xl transition-colors"
+                onClick={() => { setShowGlobalPinModal(false); setTempPin(''); }}
+                className="flex-1 py-4 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded-xl transition-colors"
               >
-                Close
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  const res = await verifyPin(tempPin);
+                  if (res.success) {
+                    setGlobalPin(tempPin);
+                    setGlobalEditMode(true);
+                    setShowGlobalPinModal(false);
+                    setTempPin('');
+                  } else {
+                    alert('Invalid PIN');
+                    setTempPin('');
+                  }
+                }}
+                className="flex-1 py-4 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl transition-colors"
+              >
+                Unlock
               </button>
             </div>
           </div>

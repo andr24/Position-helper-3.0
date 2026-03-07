@@ -9,7 +9,13 @@ interface PickProps {
 
 export default function Pick({ onComplete }: PickProps) {
   const [notificationId, setNotificationId] = useState('');
+  const [userName, setUserName] = useState(localStorage.getItem('kiosk_operator_name') || '');
   const [loading, setLoading] = useState(false);
+
+  const handleNameChange = (name: string) => {
+    setUserName(name);
+    localStorage.setItem('kiosk_operator_name', name);
+  };
   const [foundItem, setFoundItem] = useState<Position | null>(null);
   const [result, setResult] = useState<{ success: boolean; message?: string; position?: string } | null>(null);
 
@@ -43,16 +49,20 @@ export default function Pick({ onComplete }: PickProps) {
   };
 
   const handleConfirmPick = async () => {
+    if (!userName) {
+      setResult({ success: false, message: 'Operator name is required to pick.' });
+      return;
+    }
     setLoading(true);
     try {
-      const res = await pickItem(notificationId);
+      const res = await pickItem(notificationId, userName);
       setResult({
         success: res.success,
         message: res.message,
         position: res.position
       });
       if (res.success) {
-
+        // Removed automatic timeout return
       }
     } catch (err) {
       setResult({ success: false, message: 'Network error or server offline.' });
@@ -87,21 +97,12 @@ export default function Pick({ onComplete }: PickProps) {
             <span>{result.message}</span>
           </div>
         )}
-        <p className="text-slate-500">Pick recorded successfully.</p>
-        <div className="flex gap-4 mt-6">
-          <button
-            onClick={resetSearch}
-            className="px-8 py-4 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded-2xl transition-all"
-          >
-            Pick Another
-          </button>
-          <button
-            onClick={onComplete}
-            className="px-8 py-4 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-2xl shadow-lg transition-all"
-          >
-            Back to Menu
-          </button>
-        </div>
+        <button
+          onClick={onComplete}
+          className="mt-8 px-12 py-6 bg-blue-600 hover:bg-blue-700 text-white text-2xl font-bold rounded-2xl shadow-lg transition-all active:scale-[0.98]"
+        >
+          Return to Menu
+        </button>
       </div>
     );
   }
@@ -182,6 +183,18 @@ export default function Pick({ onComplete }: PickProps) {
             </div>
           </div>
 
+          <div>
+            <label className="block text-lg font-medium text-slate-700 mb-2">Operator (Required)</label>
+            <input
+              type="text"
+              required
+              value={userName}
+              onChange={e => handleNameChange(e.target.value)}
+              className="w-full text-2xl p-4 border-2 border-slate-300 rounded-xl focus:border-blue-500 focus:ring-4 focus:ring-blue-100 outline-none transition-all"
+              placeholder="Operator Name"
+            />
+          </div>
+
           <div className="grid grid-cols-2 gap-4">
             <button
               onClick={resetSearch}
@@ -191,8 +204,8 @@ export default function Pick({ onComplete }: PickProps) {
             </button>
             <button
               onClick={handleConfirmPick}
-              disabled={loading}
-              className="py-6 bg-blue-600 hover:bg-blue-700 text-white text-xl font-bold rounded-2xl shadow-lg transition-all active:scale-[0.98] flex items-center justify-center gap-3"
+              disabled={loading || !userName}
+              className="py-6 bg-blue-600 hover:bg-blue-700 text-white text-xl font-bold rounded-2xl shadow-lg transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-3"
             >
               {loading && <Loader2 className="animate-spin" />}
               {loading ? 'Picking...' : 'Confirm Pick'}

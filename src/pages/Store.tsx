@@ -11,8 +11,13 @@ export default function Store({ onComplete }: StoreProps) {
     notificationId: '',
     partGroup: 'NS',
     notifType: 'OTC',
-    userName: ''
+    userName: localStorage.getItem('kiosk_operator_name') || ''
   });
+
+  const handleNameChange = (name: string) => {
+    setFormData({ ...formData, userName: name });
+    localStorage.setItem('kiosk_operator_name', name);
+  };
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<{ success: boolean; message?: string; position?: string } | null>(null);
 
@@ -117,11 +122,12 @@ export default function Store({ onComplete }: StoreProps) {
         </div>
 
         <div>
-          <label className="block text-lg font-medium text-slate-700 mb-2">Operator (Optional)</label>
+          <label className="block text-lg font-medium text-slate-700 mb-2">Operator (Required)</label>
           <input
             type="text"
+            required
             value={formData.userName}
-            onChange={e => setFormData({ ...formData, userName: e.target.value })}
+            onChange={e => handleNameChange(e.target.value)}
             className="w-full text-2xl p-4 border-2 border-slate-300 rounded-xl focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100 outline-none transition-all"
             placeholder="Operator Name"
           />
