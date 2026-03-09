@@ -1,19 +1,15 @@
 @echo off
-title Kiosk Inventory System
-echo Starting Kiosk Server...
 cd /d "%~dp0"
 
-:: Start the server in a new minimized window
-start /min cmd /c "npm run dev"
+echo Starting Kiosk Server...
+:: Start the Node.js server in the background
+start /B npm run start
 
-:: Wait 5 seconds for the server to initialize
 echo Waiting for server to start...
+:: Wait for 5 seconds to let the server start up
 timeout /t 5 /nobreak > NUL
 
-:: Open the default web browser to the app in kiosk mode (Chrome example)
-:: start chrome --kiosk http://localhost:3000
-:: Or just open the default browser:
-start http://localhost:3000
-
-echo App started! You can close this window.
-exit
+echo Opening App in Fullscreen...
+:: Launch Edge in Fullscreen (Kiosk) mode
+:: If you prefer Chrome, change 'msedge' to 'chrome'
+start msedge --kiosk http://localhost:3000
