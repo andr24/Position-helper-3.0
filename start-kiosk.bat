@@ -10,6 +10,6 @@ echo Waiting for server to start...
 timeout /t 5 /nobreak > NUL
 
 echo Opening App in Fullscreen...
-:: Launch Edge in Fullscreen (Kiosk) mode
-:: If you prefer Chrome, change 'msedge' to 'chrome'
-start msedge --kiosk http://localhost:3000
+:: Using a temporary user data directory forces Edge to open a brand new window.
+:: This ensures the --kiosk flag works even if you already have Edge open in the background.
+start msedge --kiosk http://localhost:3000 --user-data-dir="%temp%\kiosk_session"
