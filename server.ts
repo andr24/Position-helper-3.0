@@ -106,6 +106,46 @@ if (checkCols.count === 0) {
   transaction();
 }
 
+// --- BACKUP SYSTEM ---
+const BACKUP_DIR = path.join(DATA_DIR, 'backups');
+if (!fs.existsSync(BACKUP_DIR)) fs.mkdirSync(BACKUP_DIR);
+
+function runBackup() {
+  try {
+    const dbPath = path.join(DATA_DIR, 'kiosk.db');
+    if (!fs.existsSync(dbPath)) return;
+
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const backupPath = path.join(BACKUP_DIR, `kiosk_backup_${timestamp}.db`);
+
+    // Copy the database file
+    fs.copyFileSync(dbPath, backupPath);
+    console.log(`[Backup] Created: ${backupPath}`);
+
+    // Manage old backups (keep max 5)
+    const files = fs.readdirSync(BACKUP_DIR)
+      .filter(f => f.startsWith('kiosk_backup_') && f.endsWith('.db'))
+      .map(f => ({ name: f, time: fs.statSync(path.join(BACKUP_DIR, f)).mtime.getTime() }))
+      .sort((a, b) => b.time - a.time); // Sort newest first
+
+    if (files.length > 5) {
+      const toDelete = files.slice(5);
+      for (const file of toDelete) {
+        fs.unlinkSync(path.join(BACKUP_DIR, file.name));
+        console.log(`[Backup] Deleted old backup: ${file.name}`);
+      }
+    }
+  } catch (err) {
+    console.error('[Backup] Failed:', err);
+  }
+}
+
+// Run backup every 5 minutes
+setInterval(runBackup, 5 * 60 * 1000);
+// Run initial backup on startup
+runBackup();
+// ---------------------
+
 async function startServer() {
   const app = express();
   const PORT = process.env.PORT || 3000;
