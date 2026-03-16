@@ -36,3 +36,10 @@ export interface PickResponse {
   position?: string;
   message?: string;
 }
+
+export interface LogEntry {
+  id: number;
+  action: string;
+  details: string;
+  timestamp: string;
+}

@@ -1,6 +1,8 @@
-import React, { useState } from 'react';
-import { storeItem } from '../api';
+import React, { useState, useEffect } from 'react';
+import { storeItem, getLogs } from '../api';
 import { Loader2, CheckCircle, AlertCircle } from 'lucide-react';
+import { LogEntry } from '../types';
+import RecentActions from '../components/RecentActions';
 
 interface StoreProps {
   onComplete: () => void;
@@ -20,6 +22,20 @@ export default function Store({ onComplete }: StoreProps) {
   };
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<{ success: boolean; message?: string; position?: string } | null>(null);
+  const [logs, setLogs] = useState<LogEntry[]>([]);
+
+  useEffect(() => {
+    fetchLogs();
+  }, []);
+
+  const fetchLogs = async () => {
+    try {
+      const data = await getLogs();
+      setLogs(data);
+    } catch (err) {
+      console.error('Failed to fetch logs', err);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -31,6 +47,9 @@ export default function Store({ onComplete }: StoreProps) {
         message: res.message,
         position: res.position
       });
+      if (res.success) {
+        fetchLogs();
+      }
     } catch (err) {
       setResult({ success: false, message: 'Network error or server offline.' });
     } finally {
@@ -71,84 +90,90 @@ export default function Store({ onComplete }: StoreProps) {
   }
 
   return (
-    <div className="max-w-2xl mx-auto bg-white rounded-3xl shadow-xl p-8 border border-slate-200">
-      <h2 className="text-3xl font-bold mb-8 text-slate-800">Store New Item</h2>
+    <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-8">
+      <div className="lg:col-span-2 bg-white rounded-3xl shadow-xl p-8 border border-slate-200">
+        <h2 className="text-3xl font-bold mb-8 text-slate-800">Store New Item</h2>
 
-      <form onSubmit={handleSubmit} className="space-y-6">
-        <div>
-          <label className="block text-lg font-medium text-slate-700 mb-2">Notification ID</label>
-          <input
-            type="text"
-            required
-            value={formData.notificationId}
-            onChange={e => setFormData({ ...formData, notificationId: e.target.value })}
-            className="w-full text-3xl p-4 border-2 border-slate-300 rounded-xl focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100 outline-none transition-all font-mono"
-            placeholder="e.g. 12345"
-          />
-        </div>
-
-        <div className="grid grid-cols-2 gap-6">
+        <form onSubmit={handleSubmit} className="space-y-6">
           <div>
-            <label className="block text-lg font-medium text-slate-700 mb-2">Part Group</label>
-            <div className="flex gap-2">
-              {['NS', 'SUB', 'A-Rank'].map(opt => (
-                <button
-                  key={opt}
-                  type="button"
-                  onClick={() => setFormData({ ...formData, partGroup: opt })}
-                  className={`flex-1 py-4 text-xl font-bold rounded-xl border-2 transition-all ${formData.partGroup === opt
-                    ? 'bg-emerald-600 border-emerald-600 text-white'
-                    : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-50'
-                    } ${opt === 'A-Rank' ? 'text-lg' : ''}`}
-                >
-                  {opt}
-                </button>
-              ))}
+            <label className="block text-lg font-medium text-slate-700 mb-2">Notification ID</label>
+            <input
+              type="text"
+              required
+              value={formData.notificationId}
+              onChange={e => setFormData({ ...formData, notificationId: e.target.value })}
+              className="w-full text-3xl p-4 border-2 border-slate-300 rounded-xl focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100 outline-none transition-all font-mono"
+              placeholder="e.g. 12345"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-6">
+            <div>
+              <label className="block text-lg font-medium text-slate-700 mb-2">Part Group</label>
+              <div className="flex gap-2">
+                {['NS', 'SUB', 'A-Rank'].map(opt => (
+                  <button
+                    key={opt}
+                    type="button"
+                    onClick={() => setFormData({ ...formData, partGroup: opt })}
+                    className={`flex-1 py-4 text-xl font-bold rounded-xl border-2 transition-all ${formData.partGroup === opt
+                      ? 'bg-emerald-600 border-emerald-600 text-white'
+                      : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-50'
+                      } ${opt === 'A-Rank' ? 'text-lg' : ''}`}
+                  >
+                    {opt}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-lg font-medium text-slate-700 mb-2">Type</label>
+              <select
+                value={formData.notifType}
+                onChange={e => setFormData({ ...formData, notifType: e.target.value })}
+                className="w-full text-xl p-4 border-2 border-slate-300 rounded-xl focus:border-emerald-500 outline-none bg-white h-[68px]"
+              >
+                <option value="OTC">OTC</option>
+                <option value="EXERA2">EXERA2</option>
+                <option value="EXERA3">EXERA3</option>
+              </select>
             </div>
           </div>
 
           <div>
-            <label className="block text-lg font-medium text-slate-700 mb-2">Type</label>
-            <select
-              value={formData.notifType}
-              onChange={e => setFormData({ ...formData, notifType: e.target.value })}
-              className="w-full text-xl p-4 border-2 border-slate-300 rounded-xl focus:border-emerald-500 outline-none bg-white h-[68px]"
-            >
-              <option value="OTC">OTC</option>
-              <option value="EXERA2">EXERA2</option>
-              <option value="EXERA3">EXERA3</option>
-            </select>
+            <label className="block text-lg font-medium text-slate-700 mb-2">Operator (Required)</label>
+            <input
+              type="text"
+              required
+              value={formData.userName}
+              onChange={e => handleNameChange(e.target.value)}
+              className="w-full text-2xl p-4 border-2 border-slate-300 rounded-xl focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100 outline-none transition-all"
+              placeholder="Operator Name"
+            />
           </div>
-        </div>
 
-        <div>
-          <label className="block text-lg font-medium text-slate-700 mb-2">Operator (Required)</label>
-          <input
-            type="text"
-            required
-            value={formData.userName}
-            onChange={e => handleNameChange(e.target.value)}
-            className="w-full text-2xl p-4 border-2 border-slate-300 rounded-xl focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100 outline-none transition-all"
-            placeholder="Operator Name"
-          />
-        </div>
+          {result?.success === false && (
+            <div className="p-4 bg-red-50 text-red-700 rounded-xl flex items-center gap-3">
+              <AlertCircle />
+              <span>{result.message}</span>
+            </div>
+          )}
 
-        {result?.success === false && (
-          <div className="p-4 bg-red-50 text-red-700 rounded-xl flex items-center gap-3">
-            <AlertCircle />
-            <span>{result.message}</span>
-          </div>
-        )}
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full py-6 bg-emerald-600 hover:bg-emerald-700 text-white text-2xl font-bold rounded-2xl shadow-lg transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-3"
+          >
+            {loading && <Loader2 className="animate-spin" />}
+            {loading ? 'Processing...' : 'Find Position & Store'}
+          </button>
+        </form>
+      </div>
 
-        <button
-          type="submit"
-          disabled={loading}
-          className="w-full py-6 bg-emerald-600 hover:bg-emerald-700 text-white text-2xl font-bold rounded-2xl shadow-lg transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-3"
-        >
-          {loading && <Loader2 className="animate-spin" />}
-          {loading ? 'Processing...' : 'Find Position & Store'}
-        </button>
-      </form>
+      <div className="lg:col-span-1">
+        <RecentActions logs={logs} type="STORE" title="Recently Stored" />
+      </div>
     </div>
   );
 }
