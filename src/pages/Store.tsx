@@ -23,10 +23,21 @@ export default function Store({ onComplete }: StoreProps) {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<{ success: boolean; message?: string; position?: string } | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [settings, setSettings] = useState<Record<string, string>>({});
 
   useEffect(() => {
     fetchLogs();
+    fetchSettings();
   }, []);
+
+  const fetchSettings = async () => {
+    try {
+      const data = await fetch('/api/admin/settings').then(r => r.json());
+      setSettings(data);
+    } catch (err) {
+      console.error('Failed to fetch settings', err);
+    }
+  };
 
   const fetchLogs = async () => {
     try {
@@ -107,7 +118,7 @@ export default function Store({ onComplete }: StoreProps) {
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-6">
+          <div className={`grid gap-6 ${settings.disable_type_logic === 'true' ? 'grid-cols-1' : 'grid-cols-2'}`}>
             <div>
               <label className="block text-lg font-medium text-slate-700 mb-2">Part Group</label>
               <div className="flex gap-2">
@@ -127,18 +138,20 @@ export default function Store({ onComplete }: StoreProps) {
               </div>
             </div>
 
-            <div>
-              <label className="block text-lg font-medium text-slate-700 mb-2">Type</label>
-              <select
-                value={formData.notifType}
-                onChange={e => setFormData({ ...formData, notifType: e.target.value })}
-                className="w-full text-xl p-4 border-2 border-slate-300 rounded-xl focus:border-emerald-500 outline-none bg-white h-[68px]"
-              >
-                <option value="OTC">OTC</option>
-                <option value="EXERA2">EXERA2</option>
-                <option value="EXERA3">EXERA3</option>
-              </select>
-            </div>
+            {settings.disable_type_logic !== 'true' && (
+              <div>
+                <label className="block text-lg font-medium text-slate-700 mb-2">Type</label>
+                <select
+                  value={formData.notifType}
+                  onChange={e => setFormData({ ...formData, notifType: e.target.value })}
+                  className="w-full text-xl p-4 border-2 border-slate-300 rounded-xl focus:border-emerald-500 outline-none bg-white h-[68px]"
+                >
+                  <option value="OTC">OTC</option>
+                  <option value="EXERA2">EXERA2</option>
+                  <option value="EXERA3">EXERA3</option>
+                </select>
+              </div>
+            )}
           </div>
 
           <div>

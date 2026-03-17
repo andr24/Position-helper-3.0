@@ -1,8 +1,8 @@
-import React, { useState, useRef } from 'react';
-import { verifyPin, getRules, saveRules, changePin, getLogs } from '../api';
+import React, { useState, useRef, useEffect } from 'react';
+import { verifyPin, getRules, saveRules, changePin, getLogs, getSettings, updateSettings } from '../api';
 import { exportToExcel, importFromExcel } from '../services/excel';
 import { ColumnRule } from '../types';
-import { Lock, Save, Loader2, Download, Upload, List, Server } from 'lucide-react';
+import { Lock, Save, Loader2, Download, Upload, List, Server, Settings2 } from 'lucide-react';
 
 export default function Admin() {
   const [authenticated, setAuthenticated] = useState(false);
@@ -11,30 +11,37 @@ export default function Admin() {
 
   const [rules, setRules] = useState<ColumnRule[]>([]);
   const [logs, setLogs] = useState<any[]>([]);
+  const [settings, setSettings] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<'rules' | 'settings' | 'logs'>('rules');
   const [newPin, setNewPin] = useState('');
   
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  useEffect(() => {
+    if (authenticated) {
+      fetchData();
+    }
+  }, [authenticated]);
+
+  const fetchData = async () => {
+    setLoading(true);
+    const [rulesData, logsData, settingsData] = await Promise.all([getRules(), getLogs(), getSettings()]);
+    setRules(rulesData);
+    setLogs(logsData);
+    setSettings(settingsData);
+    setLoading(false);
+  };
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     const res = await verifyPin(pin);
     if (res.success) {
       setAuthenticated(true);
-      fetchRules();
     } else {
       setError('Invalid PIN');
       setPin('');
     }
-  };
-
-  const fetchRules = async () => {
-    setLoading(true);
-    const [rulesData, logsData] = await Promise.all([getRules(), getLogs()]);
-    setRules(rulesData);
-    setLogs(logsData);
-    setLoading(false);
   };
 
   const handleSaveRules = async () => {
@@ -42,6 +49,12 @@ export default function Admin() {
     await saveRules(rules);
     setLoading(false);
     alert('Rules saved successfully!');
+  };
+
+  const handleUpdateSetting = async (key: string, value: string) => {
+    const newSettings = { ...settings, [key]: value };
+    setSettings(newSettings);
+    await updateSettings(newSettings);
   };
 
   const handleChangePin = async () => {
@@ -144,11 +157,15 @@ export default function Admin() {
                 <th className="p-4 border-b">Enabled</th>
                 <th className="p-4 border-b">Priority</th>
                 <th className="p-4 border-b">Cap</th>
-                <th className="p-4 border-b">NS</th>
-                <th className="p-4 border-b">SUB</th>
-                <th className="p-4 border-b">OTC</th>
-                <th className="p-4 border-b">EXERA2</th>
-                <th className="p-4 border-b">EXERA3</th>
+                {settings.disable_type_logic !== 'true' && (
+                  <>
+                    <th className="p-4 border-b">NS</th>
+                    <th className="p-4 border-b">SUB</th>
+                    <th className="p-4 border-b">OTC</th>
+                    <th className="p-4 border-b">EXERA2</th>
+                    <th className="p-4 border-b">EXERA3</th>
+                  </>
+                )}
               </tr>
             </thead>
             <tbody>
@@ -179,11 +196,15 @@ export default function Admin() {
                       className="w-16 p-2 border rounded text-center"
                     />
                   </td>
-                  <td className="p-4"><input type="checkbox" checked={!!rule.allow_ns} onChange={e => updateRule(idx, 'allow_ns', e.target.checked ? 1 : 0)} className="w-5 h-5" /></td>
-                  <td className="p-4"><input type="checkbox" checked={!!rule.allow_sub} onChange={e => updateRule(idx, 'allow_sub', e.target.checked ? 1 : 0)} className="w-5 h-5" /></td>
-                  <td className="p-4"><input type="checkbox" checked={!!rule.allow_otc} onChange={e => updateRule(idx, 'allow_otc', e.target.checked ? 1 : 0)} className="w-5 h-5" /></td>
-                  <td className="p-4"><input type="checkbox" checked={!!rule.allow_exera2} onChange={e => updateRule(idx, 'allow_exera2', e.target.checked ? 1 : 0)} className="w-5 h-5" /></td>
-                  <td className="p-4"><input type="checkbox" checked={!!rule.allow_exera3} onChange={e => updateRule(idx, 'allow_exera3', e.target.checked ? 1 : 0)} className="w-5 h-5" /></td>
+                  {settings.disable_type_logic !== 'true' && (
+                    <>
+                      <td className="p-4"><input type="checkbox" checked={!!rule.allow_ns} onChange={e => updateRule(idx, 'allow_ns', e.target.checked ? 1 : 0)} className="w-5 h-5" /></td>
+                      <td className="p-4"><input type="checkbox" checked={!!rule.allow_sub} onChange={e => updateRule(idx, 'allow_sub', e.target.checked ? 1 : 0)} className="w-5 h-5" /></td>
+                      <td className="p-4"><input type="checkbox" checked={!!rule.allow_otc} onChange={e => updateRule(idx, 'allow_otc', e.target.checked ? 1 : 0)} className="w-5 h-5" /></td>
+                      <td className="p-4"><input type="checkbox" checked={!!rule.allow_exera2} onChange={e => updateRule(idx, 'allow_exera2', e.target.checked ? 1 : 0)} className="w-5 h-5" /></td>
+                      <td className="p-4"><input type="checkbox" checked={!!rule.allow_exera3} onChange={e => updateRule(idx, 'allow_exera3', e.target.checked ? 1 : 0)} className="w-5 h-5" /></td>
+                    </>
+                  )}
                 </tr>
               ))}
             </tbody>
@@ -192,7 +213,23 @@ export default function Admin() {
       )}
 
       {activeTab === 'settings' && (
-        <div className="flex-1 bg-white rounded-2xl shadow p-8">
+        <div className="flex-1 bg-white rounded-2xl shadow p-8 overflow-y-auto">
+          <h3 className="text-xl font-bold mb-4 flex items-center gap-2"><Settings2 size={24} /> General Settings</h3>
+          <div className="max-w-md mb-8 p-6 bg-slate-50 border border-slate-200 rounded-xl">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="font-bold text-slate-800">Disable Type Logic</p>
+                <p className="text-sm text-slate-500">Hide Type selection in Store and ignore column type rules.</p>
+              </div>
+              <button
+                onClick={() => handleUpdateSetting('disable_type_logic', settings.disable_type_logic === 'true' ? 'false' : 'true')}
+                className={`w-14 h-8 rounded-full transition-colors relative ${settings.disable_type_logic === 'true' ? 'bg-emerald-600' : 'bg-slate-300'}`}
+              >
+                <div className={`absolute top-1 w-6 h-6 bg-white rounded-full transition-all ${settings.disable_type_logic === 'true' ? 'left-7' : 'left-1'}`} />
+              </button>
+            </div>
+          </div>
+
           <h3 className="text-xl font-bold mb-4">Security</h3>
           <div className="max-w-md mb-8">
             <label className="block mb-2 font-medium">Change Admin PIN</label>

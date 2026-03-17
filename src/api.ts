@@ -93,6 +93,20 @@ export async function pickItem(notificationId: string, userName: string): Promis
   return res.json();
 }
 
+export async function getSettings(): Promise<Record<string, string>> {
+  const res = await fetch('/api/admin/settings');
+  return res.json();
+}
+
+export async function updateSettings(settings: Record<string, string>): Promise<{ success: boolean }> {
+  const res = await fetch('/api/admin/settings', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ settings })
+  });
+  return res.json();
+}
+
 export async function importData(data: any): Promise<{ success: boolean; message?: string }> {
   const res = await fetch('/api/admin/import', {
     method: 'POST',

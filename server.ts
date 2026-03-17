@@ -86,6 +86,13 @@ try {
 const checkSettings = db.prepare('SELECT count(*) as count FROM settings').get() as { count: number };
 if (checkSettings.count === 0) {
   db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run('admin_pin', '0000');
+  db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run('disable_type_logic', 'false');
+} else {
+  // Ensure disable_type_logic exists for existing databases
+  const hasTypeLogic = db.prepare("SELECT count(*) as count FROM settings WHERE key = 'disable_type_logic'").get() as { count: number };
+  if (hasTypeLogic.count === 0) {
+    db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run('disable_type_logic', 'false');
+  }
 }
 
 // Seed Columns A-Z if empty
@@ -205,6 +212,27 @@ async function startServer() {
     } else {
       res.status(401).json({ success: false, message: 'Invalid PIN' });
     }
+  });
+
+  app.get('/api/admin/settings', (req, res) => {
+    const settings = db.prepare('SELECT * FROM settings').all();
+    const formatted = settings.reduce((acc: any, s: any) => {
+      acc[s.key] = s.value;
+      return acc;
+    }, {});
+    res.json(formatted);
+  });
+
+  app.post('/api/admin/settings', (req, res) => {
+    const { settings } = req.body;
+    const upsert = db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)');
+    const transaction = db.transaction((sList) => {
+      for (const [key, value] of Object.entries(sList)) {
+        upsert.run(key, String(value));
+      }
+    });
+    transaction(settings);
+    res.json({ success: true });
   });
 
   app.post('/api/admin/pin', (req, res) => {
@@ -357,14 +385,19 @@ async function startServer() {
 
       // 2. Find free slot based on rules
       const columns = db.prepare('SELECT * FROM column_rules WHERE enabled = 1 ORDER BY priority ASC').all() as any[];
+      const disableTypeLogic = db.prepare("SELECT value FROM settings WHERE key = 'disable_type_logic'").get() as { value: string };
+      const isTypeLogicDisabled = disableTypeLogic?.value === 'true';
+
       let selectedPos = null;
 
       for (const col of columns) {
-        if (partGroup === 'NS' && !col.allow_ns) continue;
-        if ((partGroup === 'SUB' || partGroup === 'A-Rank') && !col.allow_sub) continue;
-        if (notifType === 'OTC' && !col.allow_otc) continue;
-        if (notifType === 'EXERA2' && !col.allow_exera2) continue;
-        if (notifType === 'EXERA3' && !col.allow_exera3) continue;
+        if (!isTypeLogicDisabled) {
+          if (partGroup === 'NS' && !col.allow_ns) continue;
+          if ((partGroup === 'SUB' || partGroup === 'A-Rank') && !col.allow_sub) continue;
+          if (notifType === 'OTC' && !col.allow_otc) continue;
+          if (notifType === 'EXERA2' && !col.allow_exera2) continue;
+          if (notifType === 'EXERA3' && !col.allow_exera3) continue;
+        }
 
         const freeSlot = db.prepare(`
           SELECT * FROM positions 
