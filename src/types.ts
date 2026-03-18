@@ -9,7 +9,7 @@ export interface Position {
   notification_id?: string;
   part_group?: string;
   notif_type?: string;
-  user_name?: string;
+  operator?: string;
   timestamp?: string;
 }
 

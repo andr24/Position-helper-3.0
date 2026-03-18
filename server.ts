@@ -2,6 +2,7 @@ import express from 'express';
 import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
 import { fileURLToPath } from 'url';
 import { createServer as createViteServer } from 'vite';
 
@@ -44,7 +45,7 @@ db.exec(`
     notification_id TEXT,
     part_group TEXT,
     notif_type TEXT,
-    user_name TEXT,
+    operator TEXT,
     timestamp DATETIME
   );
 
@@ -65,8 +66,18 @@ try {
   try { db.exec("ALTER TABLE positions ADD COLUMN has_sub INTEGER DEFAULT 0;"); } catch (err) {}
   try { db.exec("ALTER TABLE positions ADD COLUMN is_a_rank INTEGER DEFAULT 0;"); } catch (err) {}
   try { db.exec("ALTER TABLE positions ADD COLUMN notif_type TEXT;"); } catch (err) {}
-  try { db.exec("ALTER TABLE positions ADD COLUMN user_name TEXT;"); } catch (err) {}
+  try { db.exec("ALTER TABLE positions ADD COLUMN operator TEXT;"); } catch (err) {}
   try { db.exec("ALTER TABLE positions ADD COLUMN timestamp DATETIME;"); } catch (err) {}
+}
+
+// Ensure operator column exists (if user_name was used before)
+try {
+  db.prepare('SELECT operator FROM positions LIMIT 1').get();
+} catch (e) {
+  try {
+    db.exec("ALTER TABLE positions ADD COLUMN operator TEXT;");
+    db.exec("UPDATE positions SET operator = user_name WHERE operator IS NULL;");
+  } catch (err) {}
 }
 
 try {
@@ -160,6 +171,26 @@ async function startServer() {
   app.use(express.json({ limit: '50mb' }));
 
   // --- API Routes ---
+
+  app.get('/api/server-info', (req, res) => {
+    const networkInterfaces = os.networkInterfaces();
+    const addresses: string[] = [];
+    for (const interfaceName in networkInterfaces) {
+      const iface = networkInterfaces[interfaceName];
+      if (iface) {
+        for (const alias of iface) {
+          if (alias.family === 'IPv4' && !alias.internal) {
+            addresses.push(alias.address);
+          }
+        }
+      }
+    }
+    res.json({
+      url: `${req.protocol}://${req.get('host')}`,
+      ips: addresses,
+      port: PORT
+    });
+  });
 
   app.get('/api/positions', (req, res) => {
     const positions = db.prepare('SELECT * FROM positions').all();
@@ -256,12 +287,12 @@ async function startServer() {
 
         const update = db.prepare(`
           UPDATE positions 
-          SET status=?, notification_id=?, part_group=?, notif_type=?, user_name=?, has_ns=?, has_sub=?, is_a_rank=?, timestamp=?
+          SET status=?, notification_id=?, part_group=?, notif_type=?, operator=?, has_ns=?, has_sub=?, is_a_rank=?, timestamp=?
           WHERE id=?
         `);
 
-        update.run(toPos.status, toPos.notification_id, toPos.part_group, toPos.notif_type, toPos.user_name, toPos.has_ns, toPos.has_sub, toPos.is_a_rank, toPos.timestamp, fromPos.id);
-        update.run(fromPos.status, fromPos.notification_id, fromPos.part_group, fromPos.notif_type, fromPos.user_name, fromPos.has_ns, fromPos.has_sub, fromPos.is_a_rank, fromPos.timestamp, toPos.id);
+        update.run(toPos.status, toPos.notification_id, toPos.part_group, toPos.notif_type, toPos.operator, toPos.has_ns, toPos.has_sub, toPos.is_a_rank, toPos.timestamp, fromPos.id);
+        update.run(fromPos.status, fromPos.notification_id, fromPos.part_group, fromPos.notif_type, fromPos.operator, fromPos.has_ns, fromPos.has_sub, fromPos.is_a_rank, fromPos.timestamp, toPos.id);
 
         db.prepare('INSERT INTO logs (action, details) VALUES (?, ?)').run('ADMIN_MOVE', `Swapped/Moved position ${fromId} with ${toId}`);
       });
@@ -282,11 +313,11 @@ async function startServer() {
     try {
       db.prepare(`
         UPDATE positions 
-        SET status=?, notification_id=?, part_group=?, notif_type=?, user_name=?, has_ns=?, has_sub=?, is_a_rank=?
+        SET status=?, notification_id=?, part_group=?, notif_type=?, operator=?, has_ns=?, has_sub=?, is_a_rank=?
         WHERE id=?
       `).run(
         position.status, position.notification_id || null, position.part_group || null, 
-        position.notif_type || null, position.user_name || null, 
+        position.notif_type || null, position.operator || null, 
         position.has_ns ? 1 : 0, position.has_sub ? 1 : 0, position.is_a_rank ? 1 : 0, 
         position.id
       );
@@ -303,14 +334,14 @@ async function startServer() {
       const transaction = db.transaction(() => {
         db.prepare('DELETE FROM positions').run();
         const insertPos = db.prepare(`
-          INSERT INTO positions (id, col_id, row_idx, status, has_ns, has_sub, is_a_rank, notification_id, part_group, notif_type, user_name, timestamp) 
+          INSERT INTO positions (id, col_id, row_idx, status, has_ns, has_sub, is_a_rank, notification_id, part_group, notif_type, operator, timestamp) 
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `);
         for (const p of positions) {
           insertPos.run(
             p.id, p.col_id, p.row_idx, p.status, 
             p.has_ns ? 1 : 0, p.has_sub ? 1 : 0, p.is_a_rank ? 1 : 0, 
-            p.notification_id, p.part_group, p.notif_type, p.user_name, p.timestamp
+            p.notification_id, p.part_group, p.notif_type, p.operator, p.timestamp
           );
         }
 
@@ -350,7 +381,7 @@ async function startServer() {
   });
 
   app.post('/api/store', (req, res) => {
-    const { notificationId, partGroup, notifType, userName } = req.body;
+    const { notificationId, partGroup, notifType, operator } = req.body;
     const now = new Date().toISOString();
 
     const transaction = db.transaction(() => {
@@ -373,9 +404,9 @@ async function startServer() {
 
           db.prepare(`
             UPDATE positions 
-            SET status='occupied', part_group='NS+SUB', has_ns=?, has_sub=?, timestamp=?, user_name=COALESCE(?, user_name)
+            SET status='occupied', part_group='NS+SUB', has_ns=?, has_sub=?, timestamp=?, operator=COALESCE(?, operator)
             WHERE id=?
-          `).run(hasNs, hasSub, now, userName || null, matchingPartial.id);
+          `).run(hasNs, hasSub, now, operator || null, matchingPartial.id);
 
           db.prepare('INSERT INTO logs (action, details) VALUES (?, ?)').run('STORE', `Stored ${partGroup} for ${notificationId} at ${matchingPartial.id} (Completed Pair)`);
           
@@ -423,9 +454,9 @@ async function startServer() {
 
       db.prepare(`
         UPDATE positions 
-        SET status=?, notification_id=?, part_group=?, notif_type=?, user_name=?, timestamp=?, has_ns=?, has_sub=?, is_a_rank=?
+        SET status=?, notification_id=?, part_group=?, notif_type=?, operator=?, timestamp=?, has_ns=?, has_sub=?, is_a_rank=?
         WHERE id=?
-      `).run(status, notificationId, partGroup, notifType, userName || '', now, hasNs, hasSub, isARank, selectedPos.id);
+      `).run(status, notificationId, partGroup, notifType, operator || '', now, hasNs, hasSub, isARank, selectedPos.id);
 
       db.prepare('INSERT INTO logs (action, details) VALUES (?, ?)').run('STORE', `Stored ${partGroup} for ${notificationId} at ${selectedPos.id} (New ${status})`);
 
@@ -438,7 +469,7 @@ async function startServer() {
   });
 
   app.post('/api/pick', (req, res) => {
-    const { notificationId, userName } = req.body;
+    const { notificationId, operator } = req.body;
 
     const transaction = db.transaction(() => {
       const pos = db.prepare('SELECT * FROM positions WHERE notification_id = ?').get(notificationId) as any;
@@ -447,11 +478,11 @@ async function startServer() {
 
       db.prepare(`
         UPDATE positions 
-        SET status='free', notification_id=NULL, part_group=NULL, notif_type=NULL, user_name=NULL, timestamp=NULL, has_ns=0, has_sub=0, is_a_rank=0
+        SET status='free', notification_id=NULL, part_group=NULL, notif_type=NULL, operator=NULL, timestamp=NULL, has_ns=0, has_sub=0, is_a_rank=0
         WHERE id=?
       `).run(pos.id);
 
-      db.prepare('INSERT INTO logs (action, details) VALUES (?, ?)').run('PICK', `Picked ${notificationId} from ${pos.id} by ${userName || 'Unknown'}`);
+      db.prepare('INSERT INTO logs (action, details) VALUES (?, ?)').run('PICK', `Picked ${notificationId} from ${pos.id} by ${operator || 'Unknown'}`);
 
       return { 
         success: true, 

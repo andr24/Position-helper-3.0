@@ -18,7 +18,7 @@ export async function exportToExcel(): Promise<{ success: boolean; message?: str
             Has_NS: p.has_ns ? 'Yes' : 'No',
             Has_SUB: p.has_sub ? 'Yes' : 'No',
             Notif_Type: p.notif_type || '',
-            User_Name: p.user_name || '',
+            Operator: p.operator || '',
             Timestamp: p.timestamp ? new Date(p.timestamp).toLocaleString() : ''
         }));
 
@@ -69,7 +69,7 @@ export async function importFromExcel(buffer: ArrayBuffer): Promise<{ success: b
             notification_id: row.Notification_ID || undefined,
             part_group: row.Part_Group || undefined,
             notif_type: row.Notif_Type || undefined,
-            user_name: row.User_Name || undefined,
+            operator: row.Operator || undefined,
             timestamp: row.Timestamp ? new Date(row.Timestamp).toISOString() : undefined
         }));
 

@@ -313,7 +313,7 @@ export default function Map() {
 
                     <div className="pt-4 border-t border-slate-100">
                       <p className="text-sm text-slate-500">
-                        Stored by <strong className="text-slate-800">{selectedPos.user_name || 'Unknown Operator'}</strong>
+                        Stored by <strong className="text-slate-800">{selectedPos.operator || 'Unknown Operator'}</strong>
                       </p>
                       <p className="text-sm text-slate-500 mt-1">
                         On {selectedPos.timestamp ? new Date(selectedPos.timestamp).toLocaleString() : 'Unknown'}

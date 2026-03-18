@@ -1,5 +1,10 @@
 import { Position, ColumnRule, StoreResponse, PickResponse } from './types';
 
+export async function getServerInfo(): Promise<{ url: string; ips: string[]; port: number }> {
+  const res = await fetch('/api/server-info');
+  return res.json();
+}
+
 export async function getPositions(): Promise<Position[]> {
   const res = await fetch('/api/positions');
   return res.json();
@@ -74,7 +79,7 @@ export async function storeItem(data: {
   notificationId: string;
   partGroup: string;
   notifType: string;
-  userName?: string;
+  operator?: string;
 }): Promise<StoreResponse> {
   const res = await fetch('/api/store', {
     method: 'POST',
@@ -84,11 +89,11 @@ export async function storeItem(data: {
   return res.json();
 }
 
-export async function pickItem(notificationId: string, userName: string): Promise<PickResponse> {
+export async function pickItem(notificationId: string, operator: string): Promise<PickResponse> {
   const res = await fetch('/api/pick', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ notificationId, userName })
+    body: JSON.stringify({ notificationId, operator })
   });
   return res.json();
 }

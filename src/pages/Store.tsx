@@ -162,7 +162,7 @@ export default function Store({ onComplete }: StoreProps) {
               value={formData.userName}
               onChange={e => handleNameChange(e.target.value)}
               className="w-full text-2xl p-4 border-2 border-slate-300 rounded-xl focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100 outline-none transition-all"
-              placeholder="Operator Name"
+              placeholder="Operator"
             />
           </div>
 

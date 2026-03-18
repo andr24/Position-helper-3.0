@@ -65,7 +65,7 @@ export default function Pick({ onComplete }: PickProps) {
 
   const handleConfirmPick = async () => {
     if (!userName) {
-      setResult({ success: false, message: 'Operator name is required to pick.' });
+      setResult({ success: false, message: 'Operator is required to pick.' });
       return;
     }
     setLoading(true);
@@ -207,7 +207,7 @@ export default function Pick({ onComplete }: PickProps) {
                 value={userName}
                 onChange={e => handleNameChange(e.target.value)}
                 className="w-full text-2xl p-4 border-2 border-slate-300 rounded-xl focus:border-blue-500 focus:ring-4 focus:ring-blue-100 outline-none transition-all"
-                placeholder="Operator Name"
+                placeholder="Operator"
               />
             </div>
 
