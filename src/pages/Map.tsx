@@ -1,9 +1,14 @@
 import { useEffect, useState } from 'react';
 import { getPositions, getRules, verifyPin, adminUpdatePosition, adminSwapPositions } from '../api';
 import { Position, ColumnRule } from '../types';
-import { RefreshCw, X, Info, Lock, Unlock } from 'lucide-react';
+import { RefreshCw, X, Info, Lock, Unlock, Layers } from 'lucide-react';
+import { ViewState } from '../App';
 
-export default function Map() {
+interface MapProps {
+  onNavigate: (view: ViewState) => void;
+}
+
+export default function Map({ onNavigate }: MapProps) {
   const [positions, setPositions] = useState<Position[]>([]);
   const [rules, setRules] = useState<ColumnRule[]>([]);
   const [loading, setLoading] = useState(true);
@@ -80,6 +85,13 @@ export default function Map() {
           >
             {globalEditMode ? <Unlock size={20} /> : <Lock size={20} />}
             {globalEditMode ? 'Edit Mode: ON' : 'Edit Mode: OFF'}
+          </button>
+          <button
+            onClick={() => onNavigate('buffer')}
+            className="flex items-center gap-2 px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg font-medium transition-colors shadow-sm"
+          >
+            <Layers size={20} />
+            Buffer
           </button>
           <button
             onClick={fetchData}

@@ -5,9 +5,10 @@ import Store from './pages/Store';
 import Pick from './pages/Pick';
 import Map from './pages/Map';
 import Admin from './pages/Admin';
+import Buffer from './pages/Buffer';
 import { AnimatePresence, motion } from 'motion/react';
 
-export type ViewState = 'home' | 'store' | 'pick' | 'map' | 'admin';
+export type ViewState = 'home' | 'store' | 'pick' | 'map' | 'admin' | 'buffer';
 
 export default function App() {
   const [view, setView] = useState<ViewState>('home');
@@ -67,7 +68,7 @@ export default function App() {
               exit={{ opacity: 0, x: -20 }}
               className="absolute inset-0 p-8 overflow-auto"
             >
-              <Map />
+              <Map onNavigate={setView} />
             </motion.div>
           )}
 
@@ -80,6 +81,18 @@ export default function App() {
               className="absolute inset-0 p-8 overflow-auto"
             >
               <Admin />
+            </motion.div>
+          )}
+
+          {view === 'buffer' && (
+            <motion.div
+              key="buffer"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              className="absolute inset-0 p-8 overflow-auto"
+            >
+              <Buffer />
             </motion.div>
           )}
         </AnimatePresence>

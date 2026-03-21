@@ -48,7 +48,11 @@ export default function Header({ title, onBack }: HeaderProps) {
           <div className="hidden sm:flex items-center gap-2 px-3 py-1 bg-slate-800/50 rounded-lg text-xs font-mono text-slate-400 border border-slate-700/50">
             <Wifi size={12} className="text-emerald-500" />
             <span className="opacity-60 uppercase tracking-wider font-bold">Connect:</span>
-            <span className="text-slate-200">{serverInfo.ips[0] || serverInfo.url.replace(/^https?:\/\//, '')}</span>
+            <span className="text-slate-200">
+              {serverInfo.ips.length > 0 
+                ? serverInfo.ips.join(', ') 
+                : serverInfo.url.replace(/^https?:\/\//, '')}
+            </span>
             {serverInfo.ips.length > 0 && <span className="text-slate-500">:{serverInfo.port}</span>}
           </div>
         )}

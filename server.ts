@@ -55,6 +55,15 @@ db.exec(`
     details TEXT,
     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
   );
+
+  CREATE TABLE IF NOT EXISTS buffer (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    notification_id TEXT,
+    part_group TEXT,
+    notif_type TEXT,
+    operator TEXT,
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
 `);
 
 // --- MIGRATIONS FOR OLDER DATABASES ---
@@ -172,6 +181,118 @@ async function startServer() {
 
   // --- API Routes ---
 
+  function drainBuffer() {
+    const bufferItems = db.prepare('SELECT * FROM buffer ORDER BY timestamp ASC').all() as any[];
+    if (bufferItems.length === 0) return;
+
+    const columns = db.prepare('SELECT * FROM column_rules WHERE enabled = 1 ORDER BY priority ASC').all() as any[];
+    const disableTypeLogic = db.prepare("SELECT value FROM settings WHERE key = 'disable_type_logic'").get() as { value: string };
+    const isTypeLogicDisabled = disableTypeLogic?.value === 'true';
+
+    for (const item of bufferItems) {
+      let selectedPos = null;
+
+      for (const col of columns) {
+        if (!isTypeLogicDisabled) {
+          if (item.part_group === 'NS' && !col.allow_ns) continue;
+          if ((item.part_group === 'SUB' || item.part_group === 'A-Rank') && !col.allow_sub) continue;
+          if (item.notif_type === 'OTC' && !col.allow_otc) continue;
+          if (item.notif_type === 'EXERA2' && !col.allow_exera2) continue;
+          if (item.notif_type === 'EXERA3' && !col.allow_exera3) continue;
+        }
+
+        const freeSlot = db.prepare(`
+          SELECT * FROM positions 
+          WHERE col_id = ? AND status = 'free' AND row_idx <= ?
+          ORDER BY row_idx ASC LIMIT 1
+        `).get(col.col_id, col.capacity) as any;
+
+        if (freeSlot) {
+          selectedPos = freeSlot;
+          break;
+        }
+      }
+
+      if (selectedPos) {
+        const isARank = item.part_group === 'A-Rank' ? 1 : 0;
+        const status = item.part_group === 'A-Rank' ? 'occupied' : 'partial';
+        const hasNs = item.part_group === 'NS' ? 1 : 0;
+        const hasSub = (item.part_group === 'SUB' || item.part_group === 'A-Rank') ? 1 : 0;
+
+        db.prepare(`
+          UPDATE positions 
+          SET status=?, notification_id=?, part_group=?, notif_type=?, operator=?, timestamp=?, has_ns=?, has_sub=?, is_a_rank=?
+          WHERE id=?
+        `).run(status, item.notification_id, item.part_group, item.notif_type, item.operator || '', item.timestamp, hasNs, hasSub, isARank, selectedPos.id);
+
+        db.prepare('DELETE FROM buffer WHERE id = ?').run(item.id);
+        db.prepare('INSERT INTO logs (action, details) VALUES (?, ?)').run('BUFFER_MOVE', `Moved ${item.notification_id} from Buffer to ${selectedPos.id}`);
+      }
+    }
+  }
+
+  app.get('/api/buffer', (req, res) => {
+    const buffer = db.prepare('SELECT * FROM buffer ORDER BY timestamp ASC').all();
+    res.json(buffer);
+  });
+
+  app.post('/api/buffer/move', (req, res) => {
+    const { bufferId } = req.body;
+    const item = db.prepare('SELECT * FROM buffer WHERE id = ?').get(bufferId) as any;
+    if (!item) return res.status(404).json({ success: false, message: 'Item not found in buffer.' });
+
+    const columns = db.prepare('SELECT * FROM column_rules WHERE enabled = 1 ORDER BY priority ASC').all() as any[];
+    const disableTypeLogic = db.prepare("SELECT value FROM settings WHERE key = 'disable_type_logic'").get() as { value: string };
+    const isTypeLogicDisabled = disableTypeLogic?.value === 'true';
+
+    let selectedPos = null;
+
+    for (const col of columns) {
+      if (!isTypeLogicDisabled) {
+        if (item.part_group === 'NS' && !col.allow_ns) continue;
+        if ((item.part_group === 'SUB' || item.part_group === 'A-Rank') && !col.allow_sub) continue;
+        if (item.notif_type === 'OTC' && !col.allow_otc) continue;
+        if (item.notif_type === 'EXERA2' && !col.allow_exera2) continue;
+        if (item.notif_type === 'EXERA3' && !col.allow_exera3) continue;
+      }
+
+      const freeSlot = db.prepare(`
+        SELECT * FROM positions 
+        WHERE col_id = ? AND status = 'free' AND row_idx <= ?
+        ORDER BY row_idx ASC LIMIT 1
+      `).get(col.col_id, col.capacity) as any;
+
+      if (freeSlot) {
+        selectedPos = freeSlot;
+        break;
+      }
+    }
+
+    if (!selectedPos) {
+      return res.status(400).json({ success: false, message: 'No suitable free positions available in the warehouse.' });
+    }
+
+    const transaction = db.transaction(() => {
+      const isARank = item.part_group === 'A-Rank' ? 1 : 0;
+      const status = item.part_group === 'A-Rank' ? 'occupied' : 'partial';
+      const hasNs = item.part_group === 'NS' ? 1 : 0;
+      const hasSub = (item.part_group === 'SUB' || item.part_group === 'A-Rank') ? 1 : 0;
+
+      db.prepare(`
+        UPDATE positions 
+        SET status=?, notification_id=?, part_group=?, notif_type=?, operator=?, timestamp=?, has_ns=?, has_sub=?, is_a_rank=?
+        WHERE id=?
+      `).run(status, item.notification_id, item.part_group, item.notif_type, item.operator || '', item.timestamp, hasNs, hasSub, isARank, selectedPos.id);
+
+      db.prepare('DELETE FROM buffer WHERE id = ?').run(item.id);
+      db.prepare('INSERT INTO logs (action, details) VALUES (?, ?)').run('BUFFER_MOVE', `Manually moved ${item.notification_id} from Buffer to ${selectedPos.id}`);
+
+      return { success: true, position: selectedPos.id };
+    });
+
+    res.json(transaction());
+  });
+
   app.get('/api/server-info', (req, res) => {
     const networkInterfaces = os.networkInterfaces();
     const addresses: string[] = [];
@@ -179,7 +300,8 @@ async function startServer() {
       const iface = networkInterfaces[interfaceName];
       if (iface) {
         for (const alias of iface) {
-          if (alias.family === 'IPv4' && !alias.internal) {
+          // Handle both 'IPv4' and 4 (newer Node.js)
+          if ((alias.family === 'IPv4' || (alias.family as any) === 4) && !alias.internal) {
             addresses.push(alias.address);
           }
         }
@@ -443,7 +565,15 @@ async function startServer() {
       }
 
       if (!selectedPos) {
-        return { success: false, message: 'No suitable free positions available.' };
+        // Store in Buffer instead of failing
+        db.prepare(`
+          INSERT INTO buffer (notification_id, part_group, notif_type, operator, timestamp)
+          VALUES (?, ?, ?, ?, ?)
+        `).run(notificationId, partGroup, notifType, operator || '', now);
+        
+        db.prepare('INSERT INTO logs (action, details) VALUES (?, ?)').run('BUFFER_STORE', `Stored ${partGroup} for ${notificationId} in Buffer (Warehouse Full)`);
+        
+        return { success: true, position: 'BUFFER', message: 'Warehouse full. Item stored in Buffer.' };
       }
 
       // 3. Occupy slot
@@ -512,7 +642,23 @@ async function startServer() {
   }
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server running on http://0.0.0.0:${PORT}`);
+    const networkInterfaces = os.networkInterfaces();
+    console.log(`\n---------------------------------------------------`);
+    console.log(` Kiosk Inventory Server is running!`);
+    console.log(`---------------------------------------------------`);
+    console.log(` Local: http://localhost:${PORT}`);
+    
+    for (const interfaceName in networkInterfaces) {
+      const iface = networkInterfaces[interfaceName];
+      if (iface) {
+        for (const alias of iface) {
+          if ((alias.family === 'IPv4' || (alias.family as any) === 4) && !alias.internal) {
+            console.log(` Network: http://${alias.address}:${PORT}`);
+          }
+        }
+      }
+    }
+    console.log(`---------------------------------------------------\n`);
   });
 }
 

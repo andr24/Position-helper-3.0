@@ -20,6 +20,20 @@ export async function getLogs(): Promise<any[]> {
   return res.json();
 }
 
+export async function getBuffer(): Promise<any[]> {
+  const res = await fetch('/api/buffer');
+  return res.json();
+}
+
+export async function moveFromBuffer(bufferId: number): Promise<{ success: boolean; message?: string; position?: string }> {
+  const res = await fetch('/api/buffer/move', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ bufferId })
+  });
+  return res.json();
+}
+
 export async function saveRules(rules: ColumnRule[]): Promise<{ success: boolean }> {
   const res = await fetch('/api/admin/rules', {
     method: 'POST',

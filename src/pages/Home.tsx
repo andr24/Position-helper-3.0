@@ -1,5 +1,7 @@
-import { PackagePlus, PackageMinus, Map as MapIcon, Settings } from 'lucide-react';
+import { PackagePlus, PackageMinus, Map as MapIcon, Settings, Layers } from 'lucide-react';
 import { ViewState } from '../App';
+import { useState, useEffect } from 'react';
+import { getBuffer } from '../api';
 
 interface HomeProps {
   onNavigate: (view: ViewState) => void;
@@ -37,7 +39,7 @@ export default function Home({ onNavigate }: HomeProps) {
         className="bg-slate-500 hover:bg-slate-600 text-white rounded-3xl shadow-lg flex flex-col items-center justify-center gap-6 transition-all transform hover:scale-[1.02] active:scale-95"
       >
         <Settings size={80} />
-        <span className="text-4xl font-bold">Admin</span>
+        <span className="text-4xl font-bold">Admin Settings</span>
       </button>
     </div>
   );
