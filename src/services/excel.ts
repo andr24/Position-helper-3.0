@@ -1,4 +1,5 @@
 import * as XLSX from 'xlsx';
+// Re-saving to clear stale linting error
 import { getPositions, getRules, getLogs, importData } from '../api';
 import { Position } from '../types';
 
@@ -87,4 +88,77 @@ export async function importFromExcel(buffer: ArrayBuffer): Promise<{ success: b
         console.error('Import error:', err);
         return { success: false, message: 'Import failed: ' + err.message };
     }
+}
+
+export async function exportLogsToExcel(logs: any[]): Promise<{ success: boolean; message?: string }> {
+    try {
+        const wb = XLSX.utils.book_new();
+        const wsLogs = XLSX.utils.json_to_sheet(logs.map(l => ({
+            ID: l.id,
+            Timestamp: new Date(l.timestamp).toLocaleString(),
+            Action: l.action,
+            Details: l.details
+        })));
+        XLSX.utils.book_append_sheet(wb, wsLogs, "ActionLogs");
+        XLSX.writeFile(wb, 'action_logs_export.xlsx');
+        return { success: true, message: 'Logs exported successfully' };
+    } catch (err: any) {
+        console.error('Logs export error:', err);
+        return { success: false, message: 'Logs export failed: ' + err.message };
+    }
+}
+
+export function downloadTemplate() {
+    const wb = XLSX.utils.book_new();
+    
+    // Positions Template
+    const positionsTemplate = [
+        {
+            Position_ID: 'A-1',
+            Column: 'A',
+            Row: 1,
+            Status: 'free',
+            Notification_ID: '',
+            Part_Group: '',
+            Has_NS: 'No',
+            Has_SUB: 'No',
+            Notif_Type: '',
+            Operator: '',
+            Timestamp: ''
+        },
+        {
+            Position_ID: 'A-2',
+            Column: 'A',
+            Row: 2,
+            Status: 'occupied',
+            Notification_ID: '12345',
+            Part_Group: 'NS+SUB',
+            Has_NS: 'Yes',
+            Has_SUB: 'Yes',
+            Notif_Type: 'OTC',
+            Operator: 'Admin',
+            Timestamp: new Date().toISOString()
+        }
+    ];
+    const wsPositions = XLSX.utils.json_to_sheet(positionsTemplate);
+    XLSX.utils.book_append_sheet(wb, wsPositions, "Positions");
+
+    // Rules Template
+    const rulesTemplate = [
+        {
+            col_id: 'A',
+            enabled: 1,
+            priority: 1,
+            capacity: 8,
+            allow_ns: 1,
+            allow_sub: 1,
+            allow_otc: 1,
+            allow_exera2: 1,
+            allow_exera3: 1
+        }
+    ];
+    const wsRules = XLSX.utils.json_to_sheet(rulesTemplate);
+    XLSX.utils.book_append_sheet(wb, wsRules, "ColumnRules");
+
+    XLSX.writeFile(wb, 'kiosk_import_template.xlsx');
 }

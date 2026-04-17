@@ -25,15 +25,6 @@ export async function getBuffer(): Promise<any[]> {
   return res.json();
 }
 
-export async function moveFromBuffer(bufferId: number): Promise<{ success: boolean; message?: string; position?: string }> {
-  const res = await fetch('/api/buffer/move', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ bufferId })
-  });
-  return res.json();
-}
-
 export async function saveRules(rules: ColumnRule[]): Promise<{ success: boolean }> {
   const res = await fetch('/api/admin/rules', {
     method: 'POST',
@@ -62,20 +53,20 @@ export async function changePin(newPin: string): Promise<{ success: boolean }> {
   return res.json();
 }
 
-export async function adminSwapPositions(pin: string, fromId: string, toId: string): Promise<{ success: boolean; message?: string }> {
+export async function adminSwapPositions(pin: string, fromId: string, toId: string, operator: string): Promise<{ success: boolean; message?: string }> {
   const res = await fetch('/api/admin/swap', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ pin, fromId, toId })
+    body: JSON.stringify({ pin, fromId, toId, operator })
   });
   return res.json();
 }
 
-export async function adminUpdatePosition(pin: string, position: Position): Promise<{ success: boolean; message?: string }> {
+export async function adminUpdatePosition(pin: string, position: Position, operator: string): Promise<{ success: boolean; message?: string }> {
   const res = await fetch('/api/admin/position', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ pin, position })
+    body: JSON.stringify({ pin, position, operator })
   });
   return res.json();
 }
@@ -131,6 +122,15 @@ export async function importData(data: any): Promise<{ success: boolean; message
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data)
+  });
+  return res.json();
+}
+
+export async function clearLogs(pin: string): Promise<{ success: boolean; message?: string }> {
+  const res = await fetch('/api/admin/logs/clear', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ pin })
   });
   return res.json();
 }

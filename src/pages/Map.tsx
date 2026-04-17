@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
-import { getPositions, getRules, verifyPin, adminUpdatePosition, adminSwapPositions } from '../api';
+import React, { useEffect, useState, useRef } from 'react';
+import { getPositions, getRules, verifyPin, adminUpdatePosition, adminSwapPositions, saveRules } from '../api';
 import { Position, ColumnRule } from '../types';
-import { RefreshCw, X, Info, Lock, Unlock, Layers } from 'lucide-react';
+import { RefreshCw, X, Info, Lock, Unlock, Layers, List, CheckCircle, Download, Upload, FileSpreadsheet, ArrowLeft, ArrowRight, Trash2, Search } from 'lucide-react';
+import { exportToExcel, importFromExcel, downloadTemplate } from '../services/excel';
 import { ViewState } from '../App';
 
 interface MapProps {
@@ -16,11 +17,17 @@ export default function Map({ onNavigate }: MapProps) {
   const [editMode, setEditMode] = useState(false);
   const [editPos, setEditPos] = useState<Position | null>(null);
   const [saving, setSaving] = useState(false);
+  const [confirmClear, setConfirmClear] = useState(false);
   
   const [globalEditMode, setGlobalEditMode] = useState(false);
   const [globalPin, setGlobalPin] = useState('');
+  const [operatorNumber, setOperatorNumber] = useState('');
   const [showGlobalPinModal, setShowGlobalPinModal] = useState(false);
   const [tempPin, setTempPin] = useState('');
+  const [tempOperator, setTempOperator] = useState('');
+  const [searchTerm, setSearchTerm] = useState('');
+  
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const fetchData = async () => {
     setLoading(true);
@@ -39,24 +46,30 @@ export default function Map({ onNavigate }: MapProps) {
     fetchData();
   }, []);
 
-  // Calculate Insights
-  const totalComplete = positions.filter(p => p.status === 'occupied' && !p.is_a_rank).length;
-  const totalARank = positions.filter(p => p.status === 'occupied' && p.is_a_rank).length;
-  const totalPartial = positions.filter(p => p.status === 'partial').length;
-  const totalOTC = positions.filter(p => p.notif_type === 'OTC' && p.status !== 'free').length;
-  const totalExera2 = positions.filter(p => p.notif_type === 'EXERA2' && p.status !== 'free').length;
-  const totalExera3 = positions.filter(p => p.notif_type === 'EXERA3' && p.status !== 'free').length;
-  const totalFree = positions.filter(p => p.status === 'free').length;
+  // Calculate Insights (Only for enabled columns and within capacity)
+  const enabledRules = rules.filter(r => r.enabled === 1);
+  const filteredPositions = positions.filter(p => {
+    const rule = enabledRules.find(r => r.col_id === p.col_id);
+    return rule && p.row_idx <= rule.capacity;
+  });
+
+  const totalComplete = filteredPositions.filter(p => p.status === 'occupied' && !p.is_a_rank).length;
+  const totalARank = filteredPositions.filter(p => p.status === 'occupied' && p.is_a_rank).length;
+  const totalPartial = filteredPositions.filter(p => p.status === 'partial').length;
+  const totalOTC = filteredPositions.filter(p => p.notif_type === 'OTC' && p.status !== 'free').length;
+  const totalExera2 = filteredPositions.filter(p => p.notif_type === 'EXERA2' && p.status !== 'free').length;
+  const totalExera3 = filteredPositions.filter(p => p.notif_type === 'EXERA3' && p.status !== 'free').length;
+  const totalFree = filteredPositions.filter(p => p.status === 'free').length;
 
   // Organize by column
-  const enabledRules = rules.filter(r => r.enabled === 1).sort((a, b) => a.col_id.localeCompare(b.col_id));
+  const sortedEnabledRules = [...enabledRules].sort((a, b) => (a.display_order - b.display_order) || a.col_id.localeCompare(b.col_id));
   const grid: Record<string, Position[]> = {};
   
-  enabledRules.forEach(r => {
+  sortedEnabledRules.forEach(r => {
     grid[r.col_id] = [];
   });
 
-  positions.forEach(p => {
+  filteredPositions.forEach(p => {
     if (grid[p.col_id]) {
       grid[p.col_id].push(p);
     }
@@ -66,16 +79,114 @@ export default function Map({ onNavigate }: MapProps) {
     grid[col].sort((a, b) => a.row_idx - b.row_idx);
   });
 
+  const handleMoveColumn = async (colId: string, direction: 'left' | 'right') => {
+    const currentIndex = sortedEnabledRules.findIndex(r => r.col_id === colId);
+    if (direction === 'left' && currentIndex === 0) return;
+    if (direction === 'right' && currentIndex === sortedEnabledRules.length - 1) return;
+
+    const targetIndex = direction === 'left' ? currentIndex - 1 : currentIndex + 1;
+    const currentRule = { ...sortedEnabledRules[currentIndex] };
+    const targetRule = { ...sortedEnabledRules[targetIndex] };
+
+    // Swap display orders
+    const tempOrder = currentRule.display_order;
+    currentRule.display_order = targetRule.display_order;
+    targetRule.display_order = tempOrder;
+
+    setSaving(true);
+    try {
+      const newRules = rules.map(r => {
+        if (r.col_id === currentRule.col_id) return { ...r, display_order: currentRule.display_order };
+        if (r.col_id === targetRule.col_id) return { ...r, display_order: targetRule.display_order };
+        return r;
+      });
+
+      const res = await saveRules(newRules);
+      if (res.success) {
+        setRules(newRules);
+      } else {
+        console.error('Failed to save column order');
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    setLoading(true);
+    try {
+      const buffer = await file.arrayBuffer();
+      const res = await importFromExcel(buffer);
+      console.log(res.message);
+      if (res.success) fetchData();
+    } catch (err) {
+      console.error('Failed to read file.');
+    }
+    setLoading(false);
+    
+    // Reset input
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
   return (
     <div className="h-full flex flex-col relative">
       <div className="flex justify-between items-center mb-6">
-        <h2 className="text-2xl font-bold text-slate-800">Warehouse Map</h2>
+        <div className="flex items-center gap-6">
+          <h2 className="text-2xl font-bold text-slate-800">Warehouse Map</h2>
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+            <input
+              type="text"
+              placeholder="Search Notification ID..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="pl-10 pr-4 py-2 bg-white border border-slate-200 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none transition-all w-64"
+            />
+          </div>
+        </div>
         <div className="flex gap-3">
+          {globalEditMode && (
+            <div className="flex bg-slate-100 rounded-lg p-1 gap-1">
+                <button
+                  onClick={async () => {
+                    setLoading(true);
+                    const res = await exportToExcel();
+                    setLoading(false);
+                    if (!res.success) console.error(res.message);
+                  }}
+                  title="Export to Excel"
+                  className="p-2 hover:bg-white hover:shadow-sm rounded-md text-slate-600 transition-all"
+                >
+                  <Download size={20} />
+                </button>
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  title="Import from Excel"
+                  className="p-2 hover:bg-white hover:shadow-sm rounded-md text-slate-600 transition-all"
+                >
+                  <Upload size={20} />
+                </button>
+                <button
+                  onClick={downloadTemplate}
+                  title="Download Import Template"
+                  className="p-2 hover:bg-white hover:shadow-sm rounded-md text-slate-600 transition-all border-l border-slate-200 ml-1"
+                >
+                  <FileSpreadsheet size={20} />
+                </button>
+              </div>
+            )}
+
           <button
             onClick={() => {
               if (globalEditMode) {
                 setGlobalEditMode(false);
                 setGlobalPin('');
+                setOperatorNumber('');
                 setEditMode(false);
               } else {
                 setShowGlobalPinModal(true);
@@ -93,6 +204,15 @@ export default function Map({ onNavigate }: MapProps) {
             <Layers size={20} />
             Buffer
           </button>
+
+          <input 
+            type="file" 
+            accept=".xlsx, .xls" 
+            className="hidden" 
+            ref={fileInputRef}
+            onChange={handleFileUpload}
+          />
+
           <button
             onClick={fetchData}
             className="flex items-center gap-2 px-4 py-2 bg-slate-200 hover:bg-slate-300 rounded-lg font-medium transition-colors"
@@ -137,13 +257,31 @@ export default function Map({ onNavigate }: MapProps) {
 
       <div className="flex-1 overflow-x-auto overflow-y-hidden pb-4">
         <div className="flex gap-4 min-w-max h-full">
-          {enabledRules.map(rule => {
+          {sortedEnabledRules.map(rule => {
             const colId = rule.col_id;
             const capacity = rule.capacity || 8;
 
             return (
               <div key={colId} className="w-24 flex flex-col gap-2">
-                <div className="text-center font-bold text-xl text-slate-500 bg-slate-100 rounded-lg py-2">
+                <div className="text-center font-bold text-xl text-slate-500 bg-slate-100 rounded-lg py-2 relative group">
+                  {globalEditMode && (
+                    <div className="absolute -top-2 left-0 right-0 flex justify-between px-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button
+                        onClick={() => handleMoveColumn(colId, 'left')}
+                        disabled={saving}
+                        className="bg-white shadow-md rounded-full p-1 text-blue-600 hover:bg-blue-50 disabled:opacity-50"
+                      >
+                        <ArrowLeft size={14} />
+                      </button>
+                      <button
+                        onClick={() => handleMoveColumn(colId, 'right')}
+                        disabled={saving}
+                        className="bg-white shadow-md rounded-full p-1 text-blue-600 hover:bg-blue-50 disabled:opacity-50"
+                      >
+                        <ArrowRight size={14} />
+                      </button>
+                    </div>
+                  )}
                   {colId}
                 </div>
                 <div className="flex-1 flex flex-col gap-2">
@@ -151,6 +289,7 @@ export default function Map({ onNavigate }: MapProps) {
                     const pos = grid[colId].find(p => p.row_idx === rowIdx);
                     const isOccupied = pos?.status === 'occupied';
                     const isPartial = pos?.status === 'partial';
+                    const isMatch = searchTerm && pos?.notification_id?.toLowerCase().includes(searchTerm.toLowerCase());
 
                     let bgClass = 'bg-emerald-100 border-emerald-200 text-emerald-700 hover:bg-emerald-200';
                     if (isOccupied) {
@@ -184,19 +323,22 @@ export default function Map({ onNavigate }: MapProps) {
                           if (!globalEditMode) return;
                           const fromId = e.dataTransfer.getData('text/plain');
                           if (fromId && fromId !== pos!.id) {
-                            const res = await adminSwapPositions(globalPin, fromId, pos!.id);
+                            const res = await adminSwapPositions(globalPin, fromId, pos!.id, operatorNumber);
                             if (res.success) {
                               fetchData();
                             } else {
-                              alert(res.message || 'Failed to move');
+                              console.error(res.message || 'Failed to move');
                             }
                           }
                         }}
-                        className={`flex-1 min-h-0 rounded-lg flex flex-col items-center justify-center text-sm font-bold border transition-colors cursor-pointer ${bgClass}`}
+                        className={`flex-1 min-h-0 rounded-lg flex flex-col items-center justify-center text-sm font-bold border transition-all cursor-pointer relative ${bgClass} ${isMatch ? 'ring-4 ring-yellow-400 ring-offset-2 z-10 scale-105' : ''}`}
                       >
                         <span className="text-lg">{rowIdx}</span>
                         {pos?.is_a_rank && <span className="text-[10px] leading-tight opacity-75">(A)</span>}
                         {isPartial && <span className="text-[10px] leading-tight opacity-90">{pos?.has_ns ? 'NS' : 'SUB'}</span>}
+                        {isMatch && (
+                          <div className="absolute -top-1 -right-1 w-3 h-3 bg-yellow-400 rounded-full border-2 border-white animate-pulse"></div>
+                        )}
                       </button>
                     );
                   })}
@@ -361,28 +503,71 @@ export default function Map({ onNavigate }: MapProps) {
             {editMode && (
               <div className="p-4 bg-slate-50 border-t border-slate-200 flex gap-4">
                 <button
-                  onClick={() => setEditMode(false)}
-                  className="flex-1 py-4 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded-xl transition-colors text-lg"
-                >
-                  Cancel
-                </button>
-                <button
                   onClick={async () => {
+                    if (!confirmClear) {
+                      setConfirmClear(true);
+                      setTimeout(() => setConfirmClear(false), 3000);
+                      return;
+                    }
+                    
+                    const clearedPos: Position = {
+                      ...editPos!,
+                      status: 'free',
+                      notification_id: '',
+                      part_group: '',
+                      notif_type: '',
+                      operator: '',
+                      has_ns: false,
+                      has_sub: false,
+                      is_a_rank: false,
+                      timestamp: ''
+                    };
                     setSaving(true);
-                    const res = await adminUpdatePosition(globalPin, editPos!);
-                    setSaving(false);
+                    const res = await adminUpdatePosition(globalPin, clearedPos, operatorNumber);
+                    setSaving(true);
                     if (res.success) {
                       fetchData();
                       setSelectedPos(null);
+                      setConfirmClear(false);
                     } else {
-                      alert(res.message || 'Failed to update');
+                      console.error(res.message || 'Failed to clear');
+                      setConfirmClear(false);
                     }
                   }}
                   disabled={saving}
-                  className="flex-1 py-4 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl transition-colors text-lg disabled:opacity-50"
+                  className={`px-4 py-4 font-bold rounded-xl transition-all text-lg disabled:opacity-50 flex items-center justify-center gap-2 ${confirmClear ? 'bg-red-600 text-white flex-1' : 'bg-red-50 text-red-600'}`}
+                  title={confirmClear ? 'Click again to confirm' : 'Clear all data'}
                 >
-                  {saving ? 'Saving...' : 'Save Changes'}
+                  <Trash2 size={24} />
+                  {confirmClear && <span>Confirm Clear?</span>}
                 </button>
+                {!confirmClear && (
+                  <button
+                    onClick={() => setEditMode(false)}
+                    className="flex-1 py-4 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded-xl transition-colors text-lg"
+                  >
+                    Cancel
+                  </button>
+                )}
+                {!confirmClear && (
+                  <button
+                    onClick={async () => {
+                      setSaving(true);
+                      const res = await adminUpdatePosition(globalPin, editPos!, operatorNumber);
+                      setSaving(false);
+                      if (res.success) {
+                        fetchData();
+                        setSelectedPos(null);
+                      } else {
+                        console.error(res.message || 'Failed to update');
+                      }
+                    }}
+                    disabled={saving}
+                    className="flex-1 py-4 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl transition-colors text-lg disabled:opacity-50"
+                  >
+                    {saving ? 'Saving...' : 'Save Changes'}
+                  </button>
+                )}
               </div>
             )}
           </div>
@@ -394,34 +579,54 @@ export default function Map({ onNavigate }: MapProps) {
         <div className="absolute inset-0 z-[70] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-in fade-in">
           <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden p-6">
             <h3 className="text-2xl font-bold text-slate-800 mb-2">Enable Edit Mode</h3>
-            <p className="text-slate-600 mb-6">Enter Admin PIN to unlock drag-and-drop and position editing.</p>
+            <p className="text-slate-600 mb-6">Enter Admin PIN and Operator Number to unlock editing.</p>
             
-            <input 
-              type="password" 
-              value={tempPin} 
-              onChange={e => setTempPin(e.target.value)} 
-              placeholder="Enter Admin PIN" 
-              className="w-full p-4 border-2 border-slate-300 rounded-xl text-center font-mono text-xl focus:border-emerald-500 outline-none mb-4"
-              autoFocus
-            />
+            <div className="space-y-4 mb-6">
+              <div>
+                <label className="block text-sm font-bold text-slate-500 mb-1 uppercase tracking-wider">Admin PIN</label>
+                <input 
+                  type="password" 
+                  value={tempPin} 
+                  onChange={e => setTempPin(e.target.value)} 
+                  placeholder="PIN" 
+                  className="w-full p-4 border-2 border-slate-300 rounded-xl text-center font-mono text-xl focus:border-emerald-500 outline-none"
+                  autoFocus
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-bold text-slate-500 mb-1 uppercase tracking-wider">Operator Number</label>
+                <input 
+                  type="text" 
+                  value={tempOperator} 
+                  onChange={e => setTempOperator(e.target.value)} 
+                  placeholder="Operator #" 
+                  className="w-full p-4 border-2 border-slate-300 rounded-xl text-center font-mono text-xl focus:border-emerald-500 outline-none"
+                />
+              </div>
+            </div>
             
             <div className="flex gap-4">
               <button
-                onClick={() => { setShowGlobalPinModal(false); setTempPin(''); }}
+                onClick={() => { setShowGlobalPinModal(false); setTempPin(''); setTempOperator(''); }}
                 className="flex-1 py-4 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded-xl transition-colors"
               >
                 Cancel
               </button>
               <button
                 onClick={async () => {
+                  if (!tempOperator.trim()) {
+                    alert('Please enter an operator number');
+                    return;
+                  }
                   const res = await verifyPin(tempPin);
                   if (res.success) {
                     setGlobalPin(tempPin);
+                    setOperatorNumber(tempOperator);
                     setGlobalEditMode(true);
                     setShowGlobalPinModal(false);
                     setTempPin('');
+                    setTempOperator('');
                   } else {
-                    alert('Invalid PIN');
                     setTempPin('');
                   }
                 }}

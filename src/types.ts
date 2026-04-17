@@ -17,6 +17,7 @@ export interface ColumnRule {
   col_id: string;
   enabled: number; // 0 or 1
   priority: number;
+  display_order: number;
   capacity: number;
   allow_ns: number;
   allow_sub: number;

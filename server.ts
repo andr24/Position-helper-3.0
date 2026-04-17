@@ -26,6 +26,7 @@ db.exec(`
     col_id TEXT PRIMARY KEY,
     enabled INTEGER DEFAULT 1,
     priority INTEGER DEFAULT 0,
+    display_order INTEGER DEFAULT 0,
     capacity INTEGER DEFAULT 8,
     allow_ns INTEGER DEFAULT 1,
     allow_sub INTEGER DEFAULT 1,
@@ -90,6 +91,16 @@ try {
 }
 
 try {
+  db.prepare('SELECT display_order FROM column_rules LIMIT 1').get();
+} catch (e) {
+  console.log("Migrating database: adding display_order to column_rules table...");
+  try { 
+    db.exec("ALTER TABLE column_rules ADD COLUMN display_order INTEGER DEFAULT 0;"); 
+    db.exec("UPDATE column_rules SET display_order = priority;");
+  } catch (err) {}
+}
+
+try {
   db.prepare('SELECT allow_ns FROM column_rules LIMIT 1').get();
 } catch (e) {
   console.log("Migrating database: adding missing columns to column_rules table...");
@@ -118,13 +129,13 @@ if (checkSettings.count === 0) {
 // Seed Columns A-Z if empty
 const checkCols = db.prepare('SELECT count(*) as count FROM column_rules').get() as { count: number };
 if (checkCols.count === 0) {
-  const insertCol = db.prepare(`INSERT INTO column_rules (col_id, priority, capacity) VALUES (?, ?, ?)`);
+  const insertCol = db.prepare(`INSERT INTO column_rules (col_id, priority, display_order, capacity) VALUES (?, ?, ?, ?)`);
   const insertPos = db.prepare(`INSERT INTO positions (id, col_id, row_idx) VALUES (?, ?, ?)`);
 
   const transaction = db.transaction(() => {
     for (let i = 0; i < 26; i++) {
       const colChar = String.fromCharCode(65 + i);
-      insertCol.run(colChar, i + 1, 8);
+      insertCol.run(colChar, i + 1, i + 1, 8);
       for (let r = 1; r <= 8; r++) {
         insertPos.run(`${colChar}-${r}`, colChar, r);
       }
@@ -236,63 +247,6 @@ async function startServer() {
     res.json(buffer);
   });
 
-  app.post('/api/buffer/move', (req, res) => {
-    const { bufferId } = req.body;
-    const item = db.prepare('SELECT * FROM buffer WHERE id = ?').get(bufferId) as any;
-    if (!item) return res.status(404).json({ success: false, message: 'Item not found in buffer.' });
-
-    const columns = db.prepare('SELECT * FROM column_rules WHERE enabled = 1 ORDER BY priority ASC').all() as any[];
-    const disableTypeLogic = db.prepare("SELECT value FROM settings WHERE key = 'disable_type_logic'").get() as { value: string };
-    const isTypeLogicDisabled = disableTypeLogic?.value === 'true';
-
-    let selectedPos = null;
-
-    for (const col of columns) {
-      if (!isTypeLogicDisabled) {
-        if (item.part_group === 'NS' && !col.allow_ns) continue;
-        if ((item.part_group === 'SUB' || item.part_group === 'A-Rank') && !col.allow_sub) continue;
-        if (item.notif_type === 'OTC' && !col.allow_otc) continue;
-        if (item.notif_type === 'EXERA2' && !col.allow_exera2) continue;
-        if (item.notif_type === 'EXERA3' && !col.allow_exera3) continue;
-      }
-
-      const freeSlot = db.prepare(`
-        SELECT * FROM positions 
-        WHERE col_id = ? AND status = 'free' AND row_idx <= ?
-        ORDER BY row_idx ASC LIMIT 1
-      `).get(col.col_id, col.capacity) as any;
-
-      if (freeSlot) {
-        selectedPos = freeSlot;
-        break;
-      }
-    }
-
-    if (!selectedPos) {
-      return res.status(400).json({ success: false, message: 'No suitable free positions available in the warehouse.' });
-    }
-
-    const transaction = db.transaction(() => {
-      const isARank = item.part_group === 'A-Rank' ? 1 : 0;
-      const status = item.part_group === 'A-Rank' ? 'occupied' : 'partial';
-      const hasNs = item.part_group === 'NS' ? 1 : 0;
-      const hasSub = (item.part_group === 'SUB' || item.part_group === 'A-Rank') ? 1 : 0;
-
-      db.prepare(`
-        UPDATE positions 
-        SET status=?, notification_id=?, part_group=?, notif_type=?, operator=?, timestamp=?, has_ns=?, has_sub=?, is_a_rank=?
-        WHERE id=?
-      `).run(status, item.notification_id, item.part_group, item.notif_type, item.operator || '', item.timestamp, hasNs, hasSub, isARank, selectedPos.id);
-
-      db.prepare('DELETE FROM buffer WHERE id = ?').run(item.id);
-      db.prepare('INSERT INTO logs (action, details) VALUES (?, ?)').run('BUFFER_MOVE', `Manually moved ${item.notification_id} from Buffer to ${selectedPos.id}`);
-
-      return { success: true, position: selectedPos.id };
-    });
-
-    res.json(transaction());
-  });
-
   app.get('/api/server-info', (req, res) => {
     const networkInterfaces = os.networkInterfaces();
     const addresses: string[] = [];
@@ -327,7 +281,7 @@ async function startServer() {
   });
 
   app.get('/api/admin/rules', (req, res) => {
-    const rules = db.prepare('SELECT * FROM column_rules ORDER BY col_id').all();
+    const rules = db.prepare('SELECT * FROM column_rules ORDER BY priority ASC, col_id ASC').all();
     res.json(rules);
   });
 
@@ -336,17 +290,32 @@ async function startServer() {
     res.json(logs);
   });
 
+  app.post('/api/admin/logs/clear', (req, res) => {
+    const { pin } = req.body;
+    const stored = db.prepare("SELECT value FROM settings WHERE key = 'admin_pin'").get() as { value: string };
+    if (!stored || stored.value !== pin) {
+      return res.status(401).json({ success: false, message: 'Invalid PIN' });
+    }
+
+    try {
+      db.prepare('DELETE FROM logs').run();
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: err.message });
+    }
+  });
+
   app.post('/api/admin/rules', (req, res) => {
     const { rules } = req.body;
     const update = db.prepare(`
       UPDATE column_rules 
-      SET enabled=?, priority=?, capacity=?, allow_ns=?, allow_sub=?, allow_otc=?, allow_exera2=?, allow_exera3=?
+      SET enabled=?, priority=?, display_order=?, capacity=?, allow_ns=?, allow_sub=?, allow_otc=?, allow_exera2=?, allow_exera3=?
       WHERE col_id=?
     `);
     const transaction = db.transaction((rulesList) => {
       for (const r of rulesList) {
         update.run(
-          r.enabled ? 1 : 0, r.priority, r.capacity, 
+          r.enabled ? 1 : 0, r.priority, r.display_order || r.priority, r.capacity, 
           r.allow_ns ? 1 : 0, r.allow_sub ? 1 : 0, 
           r.allow_otc ? 1 : 0, r.allow_exera2 ? 1 : 0, r.allow_exera3 ? 1 : 0,
           r.col_id
@@ -395,7 +364,7 @@ async function startServer() {
   });
 
   app.post('/api/admin/swap', (req, res) => {
-    const { pin, fromId, toId } = req.body;
+    const { pin, fromId, toId, operator } = req.body;
     const stored = db.prepare("SELECT value FROM settings WHERE key = 'admin_pin'").get() as { value: string };
     if (!stored || stored.value !== pin) {
       return res.status(401).json({ success: false, message: 'Invalid PIN' });
@@ -416,7 +385,7 @@ async function startServer() {
         update.run(toPos.status, toPos.notification_id, toPos.part_group, toPos.notif_type, toPos.operator, toPos.has_ns, toPos.has_sub, toPos.is_a_rank, toPos.timestamp, fromPos.id);
         update.run(fromPos.status, fromPos.notification_id, fromPos.part_group, fromPos.notif_type, fromPos.operator, fromPos.has_ns, fromPos.has_sub, fromPos.is_a_rank, fromPos.timestamp, toPos.id);
 
-        db.prepare('INSERT INTO logs (action, details) VALUES (?, ?)').run('ADMIN_MOVE', `Swapped/Moved position ${fromId} with ${toId}`);
+        db.prepare('INSERT INTO logs (action, details) VALUES (?, ?)').run('ADMIN_MOVE', `Operator ${operator || 'Unknown'} swapped/moved position ${fromId} with ${toId}`);
       });
       transaction();
       res.json({ success: true });
@@ -426,7 +395,7 @@ async function startServer() {
   });
 
   app.post('/api/admin/position', (req, res) => {
-    const { pin, position } = req.body;
+    const { pin, position, operator } = req.body;
     const stored = db.prepare("SELECT value FROM settings WHERE key = 'admin_pin'").get() as { value: string };
     if (!stored || stored.value !== pin) {
       return res.status(401).json({ success: false, message: 'Invalid PIN' });
@@ -435,15 +404,21 @@ async function startServer() {
     try {
       db.prepare(`
         UPDATE positions 
-        SET status=?, notification_id=?, part_group=?, notif_type=?, operator=?, has_ns=?, has_sub=?, is_a_rank=?
+        SET status=?, notification_id=?, part_group=?, notif_type=?, operator=?, has_ns=?, has_sub=?, is_a_rank=?, timestamp=?
         WHERE id=?
       `).run(
-        position.status, position.notification_id || null, position.part_group || null, 
-        position.notif_type || null, position.operator || null, 
-        position.has_ns ? 1 : 0, position.has_sub ? 1 : 0, position.is_a_rank ? 1 : 0, 
+        position.status, 
+        position.notification_id || null, 
+        position.part_group || null, 
+        position.notif_type || null, 
+        position.operator || null, 
+        position.has_ns ? 1 : 0, 
+        position.has_sub ? 1 : 0, 
+        position.is_a_rank ? 1 : 0, 
+        position.timestamp || null,
         position.id
       );
-      db.prepare('INSERT INTO logs (action, details) VALUES (?, ?)').run('ADMIN_EDIT', `Manually edited position ${position.id}`);
+      db.prepare('INSERT INTO logs (action, details) VALUES (?, ?)').run('ADMIN_EDIT', `Operator ${operator || 'Unknown'} manually edited position ${position.id}`);
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ success: false, message: err.message });
@@ -469,11 +444,11 @@ async function startServer() {
 
         if (rules && rules.length > 0) {
           const updateRule = db.prepare(`
-            UPDATE column_rules SET enabled=?, priority=?, capacity=?, allow_ns=?, allow_sub=?, allow_otc=?, allow_exera2=?, allow_exera3=? WHERE col_id=?
+            UPDATE column_rules SET enabled=?, priority=?, display_order=?, capacity=?, allow_ns=?, allow_sub=?, allow_otc=?, allow_exera2=?, allow_exera3=? WHERE col_id=?
           `);
           for (const r of rules) {
             updateRule.run(
-              r.enabled ? 1 : 0, r.priority, r.capacity, 
+              r.enabled ? 1 : 0, r.priority, r.display_order || r.priority, r.capacity, 
               r.allow_ns ? 1 : 0, r.allow_sub ? 1 : 0, 
               r.allow_otc ? 1 : 0, r.allow_exera2 ? 1 : 0, r.allow_exera3 ? 1 : 0,
               r.col_id
@@ -510,7 +485,7 @@ async function startServer() {
       // 0. Check if already completely occupied
       const fullyOccupied = db.prepare("SELECT * FROM positions WHERE notification_id = ? AND status = 'occupied'").get(notificationId) as any;
       if (fullyOccupied) {
-        return { success: false, message: 'This Notification ID is already fully stored.' };
+        return { success: false, message: `This Notification ID is already fully stored at position ${fullyOccupied.id}.` };
       }
 
       // 1. Check for Strict Pairing Match (partial slot with same ID)
@@ -518,8 +493,8 @@ async function startServer() {
         const matchingPartial = db.prepare("SELECT * FROM positions WHERE notification_id = ? AND status = 'partial'").get(notificationId) as any;
         
         if (matchingPartial) {
-          if (partGroup === 'NS' && matchingPartial.has_ns) return { success: false, message: 'NS part is already stored for this ID.' };
-          if (partGroup === 'SUB' && matchingPartial.has_sub) return { success: false, message: 'SUB part is already stored for this ID.' };
+          if (partGroup === 'NS' && matchingPartial.has_ns) return { success: false, message: `NS part is already stored for this ID at position ${matchingPartial.id}.` };
+          if (partGroup === 'SUB' && matchingPartial.has_sub) return { success: false, message: `SUB part is already stored for this ID at position ${matchingPartial.id}.` };
 
           const hasNs = partGroup === 'NS' ? 1 : matchingPartial.has_ns;
           const hasSub = partGroup === 'SUB' ? 1 : matchingPartial.has_sub;
@@ -613,6 +588,9 @@ async function startServer() {
       `).run(pos.id);
 
       db.prepare('INSERT INTO logs (action, details) VALUES (?, ?)').run('PICK', `Picked ${notificationId} from ${pos.id} by ${operator || 'Unknown'}`);
+
+      // Try to fill the newly freed slot from buffer
+      drainBuffer();
 
       return { 
         success: true, 

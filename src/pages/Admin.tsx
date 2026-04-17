@@ -1,8 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { verifyPin, getRules, saveRules, changePin, getLogs, getSettings, updateSettings } from '../api';
-import { exportToExcel, importFromExcel } from '../services/excel';
+// Re-saving to clear stale linting error
+import { verifyPin, getRules, saveRules, changePin, getLogs, getSettings, updateSettings, clearLogs } from '../api';
+import { exportToExcel, importFromExcel, exportLogsToExcel } from '../services/excel';
 import { ColumnRule } from '../types';
-import { Lock, Save, Loader2, Download, Upload, List, Server, Settings2 } from 'lucide-react';
+import { Lock, Save, Loader2, Download, Upload, List, Server, Settings2, ArrowUp, ArrowDown, Search, Trash2 } from 'lucide-react';
 
 export default function Admin() {
   const [authenticated, setAuthenticated] = useState(false);
@@ -15,6 +16,8 @@ export default function Admin() {
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<'rules' | 'settings' | 'logs'>('rules');
   const [newPin, setNewPin] = useState('');
+  const [logSearch, setLogSearch] = useState('');
+  const [clearAfterExport, setClearAfterExport] = useState(false);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -27,7 +30,7 @@ export default function Admin() {
   const fetchData = async () => {
     setLoading(true);
     const [rulesData, logsData, settingsData] = await Promise.all([getRules(), getLogs(), getSettings()]);
-    setRules(rulesData);
+    setRules(rulesData.sort((a, b) => a.priority - b.priority));
     setLogs(logsData);
     setSettings(settingsData);
     setLoading(false);
@@ -65,8 +68,23 @@ export default function Admin() {
   };
 
   const updateRule = (index: number, field: keyof ColumnRule, value: any) => {
-    const newRules = [...rules];
+    let newRules = [...rules];
     (newRules[index] as any)[field] = value;
+    setRules(newRules);
+  };
+
+  const moveRule = (index: number, direction: 'up' | 'down') => {
+    if (direction === 'up' && index === 0) return;
+    if (direction === 'down' && index === rules.length - 1) return;
+
+    const newRules = [...rules];
+    const targetIndex = direction === 'up' ? index - 1 : index + 1;
+    
+    // Swap items in the array
+    const temp = newRules[index];
+    newRules[index] = newRules[targetIndex];
+    newRules[targetIndex] = temp;
+
     setRules(newRules);
   };
 
@@ -90,6 +108,38 @@ export default function Admin() {
     // Reset input
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
+
+  const handleExportLogs = async () => {
+    setLoading(true);
+    try {
+      const res = await exportLogsToExcel(filteredLogs);
+      if (res.success) {
+        if (clearAfterExport) {
+          const clearRes = await clearLogs(pin);
+          if (clearRes.success) {
+            await fetchData();
+            alert('Logs exported and database cleared.');
+          } else {
+            alert('Logs exported, but failed to clear database: ' + clearRes.message);
+          }
+        } else {
+          alert('Logs exported successfully.');
+        }
+      } else {
+        alert('Export failed: ' + res.message);
+      }
+    } catch (err) {
+      console.error(err);
+      alert('An unexpected error occurred during export.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const filteredLogs = logs.filter(log => 
+    log.action.toLowerCase().includes(logSearch.toLowerCase()) ||
+    log.details.toLowerCase().includes(logSearch.toLowerCase())
+  );
 
   if (!authenticated) {
     return (
@@ -153,9 +203,10 @@ export default function Admin() {
           <table className="w-full text-left border-collapse">
             <thead className="bg-slate-50 sticky top-0 z-10">
               <tr>
+                <th className="p-4 border-b">Order</th>
                 <th className="p-4 border-b">Col</th>
-                <th className="p-4 border-b">Enabled</th>
                 <th className="p-4 border-b">Priority</th>
+                <th className="p-4 border-b">Enabled</th>
                 <th className="p-4 border-b">Cap</th>
                 {settings.disable_type_logic !== 'true' && (
                   <>
@@ -171,21 +222,39 @@ export default function Admin() {
             <tbody>
               {rules.map((rule, idx) => (
                 <tr key={rule.col_id} className="hover:bg-slate-50 border-b last:border-0">
+                  <td className="p-4">
+                    <div className="flex flex-col gap-1">
+                      <button 
+                        onClick={() => moveRule(idx, 'up')}
+                        disabled={idx === 0}
+                        className="p-1 hover:bg-slate-200 rounded disabled:opacity-30"
+                      >
+                        <ArrowUp size={16} />
+                      </button>
+                      <button 
+                        onClick={() => moveRule(idx, 'down')}
+                        disabled={idx === rules.length - 1}
+                        className="p-1 hover:bg-slate-200 rounded disabled:opacity-30"
+                      >
+                        <ArrowDown size={16} />
+                      </button>
+                    </div>
+                  </td>
                   <td className="p-4 font-bold">{rule.col_id}</td>
+                  <td className="p-4">
+                    <input
+                      type="number"
+                      value={rule.priority}
+                      onChange={e => updateRule(idx, 'priority', parseInt(e.target.value) || 0)}
+                      className="w-16 p-2 border rounded text-center font-mono"
+                    />
+                  </td>
                   <td className="p-4">
                     <input
                       type="checkbox"
                       checked={!!rule.enabled}
                       onChange={e => updateRule(idx, 'enabled', e.target.checked ? 1 : 0)}
                       className="w-6 h-6 accent-emerald-600"
-                    />
-                  </td>
-                  <td className="p-4">
-                    <input
-                      type="number"
-                      value={rule.priority}
-                      onChange={e => updateRule(idx, 'priority', parseInt(e.target.value))}
-                      className="w-16 p-2 border rounded text-center"
                     />
                   </td>
                   <td className="p-4">
@@ -304,9 +373,41 @@ export default function Admin() {
 
       {activeTab === 'logs' && (
         <div className="flex-1 bg-white rounded-2xl shadow border border-slate-200 overflow-hidden flex flex-col">
-          <div className="p-4 bg-slate-50 border-b flex justify-between items-center">
-            <h3 className="text-xl font-bold flex items-center gap-2"><List size={24} /> Action Logs</h3>
-            <span className="bg-slate-200 text-slate-700 px-3 py-1 rounded-full text-sm font-bold">{logs.length} entries</span>
+          <div className="p-4 bg-slate-50 border-b flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+            <div className="flex items-center gap-4 w-full md:w-auto">
+              <h3 className="text-xl font-bold flex items-center gap-2 whitespace-nowrap"><List size={24} /> Action Logs</h3>
+              <div className="relative flex-1 md:w-64">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                <input
+                  type="text"
+                  placeholder="Search logs..."
+                  value={logSearch}
+                  onChange={e => setLogSearch(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2 border rounded-lg focus:ring-2 focus:ring-slate-200 outline-none"
+                />
+              </div>
+            </div>
+            
+            <div className="flex items-center gap-4 w-full md:w-auto">
+              <label className="flex items-center gap-2 text-sm font-medium text-slate-600 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={clearAfterExport}
+                  onChange={e => setClearAfterExport(e.target.checked)}
+                  className="w-4 h-4 rounded accent-slate-800"
+                />
+                Clear after export
+              </label>
+              
+              <button
+                onClick={handleExportLogs}
+                disabled={loading || filteredLogs.length === 0}
+                className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold transition-all disabled:opacity-50"
+              >
+                <Download size={18} />
+                Export Logs
+              </button>
+            </div>
           </div>
           <div className="flex-1 overflow-y-auto p-0">
             <table className="w-full text-left border-collapse text-sm">
@@ -318,8 +419,8 @@ export default function Admin() {
                 </tr>
               </thead>
               <tbody>
-                {logs.length === 0 && <tr><td colSpan={3} className="p-8 text-center text-slate-400">No logs found.</td></tr>}
-                {logs.map((log) => (
+                {filteredLogs.length === 0 && <tr><td colSpan={3} className="p-8 text-center text-slate-400">No logs found matching your search.</td></tr>}
+                {filteredLogs.map((log) => (
                   <tr key={log.id} className="border-b last:border-0 hover:bg-slate-50">
                     <td className="p-4 text-slate-500 whitespace-nowrap">{new Date(log.timestamp).toLocaleString()}</td>
                     <td className="p-4 font-bold">
